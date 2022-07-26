@@ -80,7 +80,7 @@ noun_list = ["anteater",
 
 
 def get_pickle(name):
-    with open(name,"wb") as f:
+    with open(name,"rb") as f:
         result = pickle.load(f)
         return result
 
@@ -118,7 +118,7 @@ if __name__ == "__main__":
         
 
     dbw   = DBWriter(db_param,collection_name = db_param["db_name"])
-    existing_collections = [col["name"] for col in list(dbw.db.list_collections())] # list all collections
+    existing_collections = dbw.db.list_collection_names() # list all collections
     print(existing_collections)
     
     
