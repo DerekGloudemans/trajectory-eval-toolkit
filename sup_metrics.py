@@ -67,7 +67,7 @@ def state_iou(a,b,threshold = 0.3):
 
 def evaluate(db_param,
              gt_collection   = "groundtruth_scene_1",
-             pred_collection = "eval1_run1",
+             pred_collection = "morose_panda--RAW_GT1_reconciled",
              sample_freq     = 30,
              break_sample = 2700,
              append_db = False,
@@ -116,8 +116,25 @@ def evaluate(db_param,
     gt_resampled = []
     pred_resampled = []
     
-    times = np.arange(start_time,stop_time+1/sample_freq,1/sample_freq)
+    times = np.arange(start_time,stop_time,1/sample_freq)
     # for each sample time, for each object, if in range find the two surrounding trajectory points and interpolate
+    
+    
+    # create id_converters
+    CONV_GT = {}
+    CONV_PRED = {}
+    running_counter = 0
+    for item in gts:
+        _id = item["_id"]
+        CONV_GT[running_counter] = _id
+        CONV_GT[_id] = running_counter
+        running_counter += 1
+    for item in preds:
+        _id = item["_id"]
+        CONV_PRED[running_counter] = _id
+        CONV_PRED[_id] = running_counter
+        running_counter += 1
+    
     for st in times:
         
         st_gt = []
@@ -138,10 +155,10 @@ def evaluate(db_param,
                 x_int = gts[gidx]["x_position"][sample_idx] + c2 * (gts[gidx]["x_position"][sample_idx+1] - gts[gidx]["x_position"][sample_idx])
                 y_int = gts[gidx]["y_position"][sample_idx] + c2 * (gts[gidx]["y_position"][sample_idx+1] - gts[gidx]["y_position"][sample_idx])
                 
-                obj = {"id":gts[gidx]["local_fragment_id"],
-                       "x":x_int,
-                       "y":y_int
-                       }
+                obj = {"id":CONV_GT[gts[gidx]["_id"]],
+                        "x":x_int,
+                        "y":y_int
+                        }
                 st_gt.append(obj)
         gt_resampled.append(st_gt)
         
@@ -149,8 +166,17 @@ def evaluate(db_param,
             if st >= pred_times[pidx,0] and st <= pred_times[pidx,1]:
                 # find closest surrounding times to st for this object - we'll sample sample_idx and sample_idx +1
                 sample_idx = 0
+                SKIP = False
                 while preds[pidx]["timestamp"][sample_idx+1] <= st:
+                    
+#                    print(pidx,sample_idx,len(preds[pidx]["timestamp"]))
                     sample_idx += 1
+                    if sample_idx+1 >= len(preds[pidx]["timestamp"]):
+                        SKIP = True
+                        break
+                
+                if SKIP:
+                    continue
                     
                 # linearly interpolate 
                 diff = preds[pidx]["timestamp"][sample_idx+1] - preds[pidx]["timestamp"][sample_idx]
@@ -159,10 +185,10 @@ def evaluate(db_param,
                 x_int = preds[pidx]["x_position"][sample_idx] + c2 * (preds[pidx]["x_position"][sample_idx+1] - preds[pidx]["x_position"][sample_idx])
                 y_int = preds[pidx]["y_position"][sample_idx] + c2 * (preds[pidx]["y_position"][sample_idx+1] - preds[pidx]["y_position"][sample_idx])
                 
-                obj = {"id":preds[pidx]["local_fragment_id"],
-                       "x":x_int,
-                       "y":y_int
-                       }
+                obj = {"id":CONV_PRED[preds[pidx]["_id"]],
+                        "x":x_int,
+                        "y":y_int
+                        }
                 st_pred.append(obj)
         pred_resampled.append(st_pred)
                 
@@ -174,21 +200,23 @@ def evaluate(db_param,
     ####################################################################################################################################################       SUPERVISED
     gt_dict = {}
     for item in gts:
-        gt_dict[item["local_fragment_id"]] = item
+        gt_dict[CONV_GT[item["_id"]]] = item
         if type(item["length"]) == list:
             item["length"] = item["length"][0]
             item["width"] = item["width"][0]
             item["height"] = item["height"][0]
+    
     pred_dict = {}
     for item in preds:
-        item["length"] = statistics.median(item["length"])
-        item["width"] = statistics.median(item["width"])
-        item["height"] = statistics.median(item["height"])
-        pred_dict[item["local_fragment_id"]] = item
+        if type(item["length"]) == list:
+            item["length"] = statistics.median(item["length"])
+            item["width"] = statistics.median(item["width"])
+            item["height"] = statistics.median(item["height"])
+        pred_dict[CONV_PRED[item["_id"]]] = item
     
-    gt_id_converter_dict = {}
-    for frag_id in gt_dict:
-        gt_id_converter_dict[frag_id] = gt_dict[frag_id]["_id"]
+    # gt_id_converter_dict = {}
+    # for frag_id in gt_dict:
+    #     gt_id_converter_dict[frag_id] = gt_dict[frag_id]["_id"]
     
     # 4. Run MOT Eval to get MOT-style metrics
     
@@ -381,7 +409,7 @@ def evaluate(db_param,
             unique_ids = list(set(traj["assigned_gt_ids"]))
             pred_assigned_id_count.append(len(unique_ids))
             
-            unique_ids = [gt_id_converter_dict[int(id)] for id in unique_ids]            
+            unique_ids = [CONV_GT[int(id)] for id in unique_ids]            
             if append_db:
                 fragment_id = traj["_id"]
                 dbw.collection.update_one({'_id':fragment_id},{'$push':{'gt_ids':unique_ids}},upsert=True)
