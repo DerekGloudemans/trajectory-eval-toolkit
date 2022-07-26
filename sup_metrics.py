@@ -346,7 +346,7 @@ def evaluate(db_param,
     total_gt = len(gt_dict)
     total_pred = len(pred_dict)
     
-    RESULT["x_variation"] = diffy/total_pred
+    RESULT["x_variation"] = diffx/total_pred
     RESULT["y_variation"] = diffy/total_pred
     
     
