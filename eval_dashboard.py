@@ -1,7 +1,14 @@
 import matplotlib.pyplot as plt
+import matplotlib.lines as lines
 import _pickle as pickle
 import numpy as np
+import cv2
+import json
+import io
 
+from scipy.stats.kde import gaussian_kde
+from scipy.stats import norm
+import matplotlib.gridspec as grid_spec
 
 """
 The basic idea is to create a grid of metric results, with each row corresponding to
@@ -21,48 +28,499 @@ Perhaps one additional row should be added with an explanation (as text) of each
 There should also be a supplementary file with, for each metric, a description, and a best and worst value (for coloration)
 """
 
+#%% Globals 
+
+global dpi
+dpi = 162
+global scale 
+scale = 50
 #plt.style.use("bmh")
+global MD
+MD = {
+    "precision":{"text":"Precision","best":1,"bad":0.5},
+    "recall":{"text":"Recall","best":1,"bad":0.5},
+    "true_negative_rate":{"text":"TNR","best":1,"bad":0},
+    "pred_match":{"text":"Pred Match Rate", "best":1,"bad":0.5},
+    "gt_match":{"text":"GT Match Rate","best":1,"bad":0.5},
+    "motp":{"text":"MOTP","best":1,"bad":0.5},
+    "mota":{"text":"MOTA","best":1,"bad":0.5},
+    "idr":{"text":"ID-Recall","best":1,"bad":0.5},
+    "idp":{"text":"ID-Precision","best":1,"bad":0.5},
+    "idf1":{"text":"ID-F1","best":1,"bad":0.5},
+    }
 
-MD = {} # metric info dict, load from file
+global color_pallette 
+color_pallette = np.array([[117,158,186],   # for primary data
+                           [160,120,120],   # for baseline / old data
+                           [210,220,220],   # for other plots
+                           [220,220,210],   # for other plots
+                           [220,210,220],   # for other plots
+                           [110,120,120],   # for other plots
+                           [120,110,120],   # for other plots
+                           [120,120,110],   # for other plots
+                           [220,220,220],   # for cmap
+                           [255,255,255]    # for pane default color
+                           ])
+
+global primary_colors
+primary_colors = np.array([[117,158,186],
+                           [117,158,176],
+                           [117,140,186],
+                           [110,158,186],
+                           [117,168,186]])
+
+secondary_colors = np.array([[160,120,120],
+                             [160,125,120],
+                             [170,120,120],
+                             [166,126,120],
+                             [148,120,120]])
+
+global cmap
+#cmap = lambda x: np.array([(255*(1-x),140,255*x)]).astype(np.uint8).tolist()
+cmap = lambda x: color_pallette[0]*(x) + color_pallette[-2]*(1-x)
+
+global classmap
+classmap = ["sedan","midsize","van","pickup","semi","truck"]
 
 
 
-def gen_spiderplot(result,ax,index = (0,0)):
-    ax[index].set_title("Overall Performance Summary")
 
-def bar_MOT(result,ax,index = (0,0)):
+#%% DONE
+
+def f2a(fig):
+    io_buf = io.BytesIO()
+    fig.savefig(io_buf, format='raw')#, dpi=dpi)
+    io_buf.seek(0)
+    img_arr = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
+                         newshape=(int(fig.bbox.bounds[3]), int(fig.bbox.bounds[2]), -1))
+    io_buf.close()
+    
+    # RGB to BGR
+    img_arr = img_arr.copy()
+    temp = img_arr[:,:,0].copy()
+    img_arr[:,:,0] = img_arr[:,:,2]
+    img_arr[:,:,2] = temp
+    return img_arr
+
+def gen_title(results,figsize):
+    name = results[0]["name"]
+    iou = results[0]["iou_threshold"]
+    comment = results[0]["description"]
+    
+    
+    
+    
+    fig = plt.figure(figsize=(figsize[0]/scale,figsize[1]/scale))
+    
+    fig.text(0.01,0.8,"Collection: ",fontsize = 2500/scale)
+    fig.text(0.25,0.8,"{}".format(name),fontsize = 2500/scale,color = color_pallette[0]/255)
+
+    fig.text(0.01,0.4,"Notable changes:",fontsize = 1500/scale)
+    fig.text(0.25,0.4,"{}".format(comment),fontsize = 1500/scale)
+
+    fig.text(0.01,0.25,"GT IOU:",fontsize = 1500/scale)
+    fig.text(0.25,0.25,"{}".format(iou),fontsize = 1500/scale)
+
+    if len(results) > 1:
+        baseline_name = results[1]["name"]
+        fig.text(0.01,0.1,"Baseline: ",fontsize = 1500/scale)
+        fig.text(0.25,0.1,"{}".format(baseline_name),fontsize = 1500/scale,color = color_pallette[1]/255)
+
+    return f2a(fig)
+
+def unsup_title(results,figsize):
+    fig = plt.figure(figsize=(figsize[0]/scale,figsize[1]/scale))
+    fig.text(0.5,0.5,"Unsupervised Statistics",fontsize = 2500/scale, va = "center",ha = "center")
+    return f2a(fig)
+
+def sup_title(results,figsize):
+    fig = plt.figure(figsize=(figsize[0]/scale,figsize[1]/scale))
+    fig.text(0.5,0.5,"Supervised Metrics",fontsize = 2500/scale, va = "center",ha = "center")
+    return f2a(fig)
+
+def bar_MOT(results,figsize):
     """
     Ravel supervised MOT metrics into a bar_chart
     """
-    include = ["idp","idr","recall","precision","MOTA","MOTP","gt_no_match", "pred_no_match","true_negative_rate"]
     
-    name = []
-    val = []
-    for met in result["metrics"]:
-        if met in include:
-            name.append(met)
-            val.append(result["metrics"][met])
+    include = ["idp","idr","recall","precision","mota","motp","gt_match", "pred_match"]#"true_negative_rate"]
+    include = include[::-1]
     
-    x_pos = np.arange(len(name))
-    ax[index].barh(x_pos,val, align='center', color = np.random.rand(len(x_pos),3))#alpha=0.5)
-    ax[index].set_yticks(x_pos, name)
-    ax[index].set_title("MOT metrics")
+
     
+    fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
+    ax = fig.add_subplot(111)
+    ax.spines.top.set_visible(False)
+    ax.spines.left.set_visible(True)
+    ax.spines.right.set_visible(False)
+    ax.yaxis.set_ticks([])
+    ax.tick_params(axis='x', labelsize= 1500/scale )  
+    ax.set_xlim([0,1.1])
+    #ax.set_position([0,0,1,1])
+    
+    both_val = []
+    for ridx,result in enumerate(results):
+        name = []
+        val = []
+        for met in include:
+            if met in result["metrics"]:
+                name.append(met)
+                val.append(result["metrics"][met])
+    
+        x_pos = np.arange(len(name))
+        ax.barh(x_pos,val, align='center', color = color_pallette[ridx]/255, alpha=0.3)
+        both_val.append(val)
+        #ax.yticks(x_pos, name)
+    
+    for idx,lab in enumerate(name):
+        # plot labels
+        x_plot = val[idx]/3 if val[idx] > 0.4 else 0.5
+        plot_lab = MD[lab]["text"]
+        ax.text(x_plot,idx,plot_lab,fontsize = 1000/scale) 
+        
+        # plot values
+        postval = both_val[0][idx]
+        posttext = "{:.2f}".format(postval)
+        x_plot = val[idx] + 0.01
+
+        # plot old value if available
+        if len(results) > 1:
+            preval = both_val[1][idx]
+            x_plot = max(both_val[0][idx],both_val[1][idx]) + 0.01
+
+            pretext = "Old: {:.2f}".format(preval)
+            ax.text(x_plot,idx+0.125,pretext,fontsize = 1000/scale,color = color_pallette[1]/255)
+
+            diff = postval - preval
+            sign = "" if diff < 0 else "+"
+            posttext = "New: {:.2f} ({}{:.2f})".format(postval,sign,diff)        
+
+        ax.text(x_plot,idx-0.125,posttext,fontsize = 1000/scale,color = color_pallette[0]/255)
+        
+       
+    
+    # Title
+    fig.text(0.5,0.95,"MOT Metrics",fontsize = 2000/scale,ha = "center")
+    return f2a(fig)
+
+def conf_matrix(result,figsize):    
+    n_c = len(classmap)
+    confusion_matrix = result[0]["metrics"]["confusion_matrix"].data.numpy()[:n_c,:n_c] #* 1000 
+    #plot confusion matrix
+    sums = np.sum(confusion_matrix,axis= 0)
+    sumss = sums[:,np.newaxis]
+    sumss = np.repeat(sumss,confusion_matrix.shape[0],1)#.transpose()
+    sumss = np.transpose(sumss)
+    percentages = np.round(confusion_matrix/sumss * 100)
+    
+    fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
+    ax = fig.add_subplot(111)
+    
+    colored = np.zeros([percentages.shape[0],percentages.shape[1],3])
+    for i in range(colored.shape[0]):
+        for j in range(colored.shape[1]):
+            colored[i,j,:] = cmap(percentages[i,j]/100)
+    
+    colored /= 255
+    
+    im = ax.imshow(colored)#,cmap = "YlGn")
+    
+    classes =  classmap
+    # We want to show all ticks...
+    ax.set_xticks(np.arange(len(classes)))
+    ax.set_yticks(np.arange(len(classes)))
+    # ... and label them with the respective list entries
+    ax.set_xticklabels(classes)
+    ax.set_yticklabels(classes)
+    ax.set_ylim(len(classes)-0.5, -0.5)
+    # Rotate the tick labels and set their alignment.
+    plt.setp(ax.get_xticklabels(), rotation=0, ha="center",
+             rotation_mode="anchor",fontsize = 1400/scale)
+    plt.setp(ax.get_yticklabels(), rotation=45, va="center",
+         rotation_mode="anchor",fontsize = 1400/scale)
+    
+    # Loop over data dimensions and create text annotations.
+    for i in range(len(classes)):
+        for j in range(len(classes)):
+            text = ax.text(j, i, "{}".format(int(confusion_matrix[i, j])),
+                       ha="center", va="bottom", color="k",fontsize = 1000/scale)
+            text = ax.text(j, i, str(percentages[i, j])+"%",
+                       ha="center", va="top", color="k",fontsize = 1400/scale)
+    
+    ax.set_xlabel("Actual",fontsize = 1800/scale)
+    ax.set_ylabel("Predicted",fontsize = 1800/scale)
+    
+    fig.text(0.5,0.95,"Class Confusion Matrix",fontsize = 2000/scale,ha = "center")
+
+    
+    return f2a(fig)
+    
+def death_pie(results,figsize):
+    fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
+    ax = fig.add_subplot(111)
+    
+    data = results[0]["metrics"]["cause_of_death"]
+    
+    labels = list(data.keys())
+    vals = list(data.values())
+    explode = ([0 for _ in range(len(labels))])  # only "explode" the 2nd slice (i.e. 'Hogs')
+    colors = [color_pallette[i+2]/255 for i in range(len(labels))]
+    
+    # find "good" death type
+    for lidx in range(len(labels)):
+        if "FOV" in labels[lidx] or "fov" in labels[lidx]:
+            good_idx = lidx
+            break
+    explode[good_idx] = 0.1
+    colors[good_idx] = color_pallette[0]/255
+
+    
+    ax.pie(vals, explode=explode, labels=labels, autopct='%1.1f%%', colors = colors, textprops={'fontsize': 1400/scale},
+            shadow=True, startangle=90)
+    ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+    
+    fig.text(0.5,0.95,"Object Cause of Death",fontsize = 2000/scale,ha = "center")
+
+    return f2a(fig)
+
+def unsup_hist(results,figsize):
+    to_plot = ["x_traveled","avg_vx","max_ax"]
+    
+    fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
+    # ax = fig.add_subplot(111)
+    # ax.spines.top.set_visible(False)
+    # ax.spines.left.set_visible(True)
+    # ax.spines.right.set_visible(False)
+    
+    # get data
+    data = [results[0]["statistics"][key]["raw"] for key in to_plot]
+    data = np.stack(data)
+    #xx = np.arange(-8,8,0.05)
+    data_pdf = []
+    for i in range(data.shape[0]):
+        pdf = gaussian_kde(data[i])
+        xx = np.arange(np.min(data[i]),np.max(data[i]),1)
+        data_pdf.append([xx,pdf(xx)])
+    #data_pdf = np.stack(data_pdf)
+    
+    if len(results) > 1:
+        data2 = [results[0]["statistics"][key]["raw"] for key in to_plot]
+        data2 = np.stack(data2)
+        data2_pdf = []
+        for i in range(data2.shape[0]):
+            pdf = gaussian_kde(data2[i])
+            xx = np.arange(np.min(data2[i]),np.max(data2[i]),1)
+            data2_pdf.append([xx,pdf(xx)])
+        data2_pdf = np.stack(data2_pdf)
+        
+    max_val = 1 #np.max(data_pdf)
+    min_xval = min(xx)
+    
+    gs = (grid_spec.GridSpec(len(data),1))
+    
+    #creating empty list
+    ax_objs = []
+    for didx in range(len(data_pdf)):
+        # creating new axes object and appending to ax_objs
+        ax_objs.append(fig.add_subplot(gs[didx:didx+1, 0:]))
+    
+        # plotting the distribution
+        # filling the space beneath the distribution
+        if len(results) > 1:
+            ax_objs[-1].fill_between(xx,data2_pdf[didx],alpha = 1,color = color_pallette[1]/255)
+        
+        ax_objs[-1].fill_between(xx,data_pdf[didx],alpha = 0.5,color = color_pallette[0]/255)
+        
+        ax_objs[-1].plot(xx,data_pdf[didx],color = "black",linewidth = 2)
+        ax_objs[-1].plot(xx,data2_pdf[didx],color = color_pallette[1]/255)
+
+
+    
+        # setting uniform x and y lims
+        ax_objs[-1].set_xlim(min(xx),max(xx))
+        ax_objs[-1].set_ylim(0,max_val)
+    
+        # make background transparent
+        rect = ax_objs[-1].patch
+        rect.set_alpha(0)
+        
+        # remove borders, axis ticks, and labels
+        ax_objs[-1].set_yticklabels([])
+        ax_objs[-1].set_yticks([])
+        ax_objs[-1].set_ylabel('')
+        
+        if didx == data.shape[0]-1:
+            ax_objs[-1].tick_params(axis='x', labelsize=1000/scale,length = 500/scale )
+            ax_objs[-1].set_xlabel("Error Distribution (ft)", fontsize = 1500/scale)
+        else:
+            ax_objs[-1].set_xticklabels([])
+            ax_objs[-1].tick_params(axis='x', length = 200/scale )
+
+        
+        spines = ["top","right","left"]#,"bottom"]
+        for s in spines:
+            ax_objs[-1].spines[s].set_visible(False)
+        ax_objs[-1].text(min_xval,max_val/2,state_names[didx],fontweight="bold",fontsize = 1500/scale,va="bottom")
+        
+        ax_objs[-1].axvline(x = 0, ymax = 0.8, linestyle = ":",color = (0.2,0.2,0.2))
+        
+        
+        # get mean,MAE, stddev, max
+        mean = np.mean(data[didx])
+        MAE  = np.mean(np.abs(data[didx]))
+        stddev = np.std(data[didx])
+        maxx = np.max(np.abs(data[didx]))
+        
+        ax_objs[-1].text(min_xval,max_val/2,     "Mean:  {:.1f}ft".format(mean),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(min_xval,max_val/2-0.05,"MAE:   {:.1f}ft".format(MAE),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(min_xval,max_val/2-0.1, "Stdev: {:.1f}ft".format(stddev),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(min_xval,max_val/2-0.15, "Max:   {:.1f}ft".format(maxx),fontsize = 1000/scale,va="top")
+        
+        if len(results) > 1:
+            
+            mean = np.mean(data2[didx])
+            MAE  = np.mean(np.abs(data2[didx]))
+            stddev = np.std(data2[didx])
+            maxx = np.max(np.abs(data2[didx]))
+            
+            xv = min_xval + 1.7
+            ax_objs[-1].text(xv,max_val/2,     "({:.1f}ft)".format(mean),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
+            ax_objs[-1].text(xv,max_val/2-0.05,"({:.1f}ft)".format(MAE),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
+            ax_objs[-1].text(xv,max_val/2-0.1, "({:.1f}ft)".format(stddev),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
+            ax_objs[-1].text(xv,max_val/2-0.15,"({:.1f}ft)".format(maxx),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
+
+    plt.tight_layout()
+    gs.update(hspace= -0.2)
+    
+    
+    fig.text(0.5,0.95,"State Error Histograms",fontsize = 2000/scale,ha = "center")
+    return f2a(fig)
+
+
+def state_error(results,figsize):
+    state_names = ["X Position","Y Position", "Length", "Width", "Height"]
+    
+    fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
+    # ax = fig.add_subplot(111)
+    # ax.spines.top.set_visible(False)
+    # ax.spines.left.set_visible(True)
+    # ax.spines.right.set_visible(False)
+    
+    # get data
+    data = results[0]["metrics"]["state_error"]
+    xx = np.arange(-8,8,0.05)
+    data = data.transpose(1,0)
+    data_pdf = []
+    for i in range(data.shape[0]):
+        pdf = gaussian_kde(data[i])
+        data_pdf.append(pdf(xx))
+    data_pdf = np.stack(data_pdf)
+    
+    if len(results) > 1:
+        data2 = results[1]["metrics"]["state_error"]
+        data2 = data2.transpose(1,0)
+        data2_pdf = []
+        for i in range(data2.shape[0]):
+            pdf = gaussian_kde(data2[i])
+            data2_pdf.append(pdf(xx))
+        data2_pdf = np.stack(data2_pdf)
+        
+    max_val = np.max(data_pdf)
+    min_xval = min(xx)
+    
+    gs = (grid_spec.GridSpec(data.shape[0],1))
+    
+    #creating empty list
+    ax_objs = []
+    for didx in range(len(data_pdf)):
+        # creating new axes object and appending to ax_objs
+        ax_objs.append(fig.add_subplot(gs[didx:didx+1, 0:]))
+    
+        # plotting the distribution
+        # filling the space beneath the distribution
+        if len(results) > 1:
+            ax_objs[-1].fill_between(xx,data2_pdf[didx],alpha = 1,color = color_pallette[1]/255)
+        
+        ax_objs[-1].fill_between(xx,data_pdf[didx],alpha = 0.5,color = color_pallette[0]/255)
+        
+        ax_objs[-1].plot(xx,data_pdf[didx],color = "black",linewidth = 2)
+        ax_objs[-1].plot(xx,data2_pdf[didx],color = color_pallette[1]/255)
+
+
+    
+        # setting uniform x and y lims
+        ax_objs[-1].set_xlim(min(xx),max(xx))
+        ax_objs[-1].set_ylim(0,max_val)
+    
+        # make background transparent
+        rect = ax_objs[-1].patch
+        rect.set_alpha(0)
+        
+        # remove borders, axis ticks, and labels
+        ax_objs[-1].set_yticklabels([])
+        ax_objs[-1].set_yticks([])
+        ax_objs[-1].set_ylabel('')
+        
+        if didx == data.shape[0]-1:
+            ax_objs[-1].tick_params(axis='x', labelsize=1000/scale,length = 500/scale )
+            ax_objs[-1].set_xlabel("Error Distribution (ft)", fontsize = 1500/scale)
+        else:
+            ax_objs[-1].set_xticklabels([])
+            ax_objs[-1].tick_params(axis='x', length = 200/scale )
+
+        
+        spines = ["top","right","left"]#,"bottom"]
+        for s in spines:
+            ax_objs[-1].spines[s].set_visible(False)
+        ax_objs[-1].text(min_xval,max_val/2,state_names[didx],fontweight="bold",fontsize = 1500/scale,va="bottom")
+        
+        ax_objs[-1].axvline(x = 0, ymax = 0.8, linestyle = ":",color = (0.2,0.2,0.2))
+        
+        
+        # get mean,MAE, stddev, max
+        mean = np.mean(data[didx])
+        MAE  = np.mean(np.abs(data[didx]))
+        stddev = np.std(data[didx])
+        maxx = np.max(np.abs(data[didx]))
+        
+        ax_objs[-1].text(min_xval,max_val/2,     "Mean:  {:.1f}ft".format(mean),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(min_xval,max_val/2-0.05,"MAE:   {:.1f}ft".format(MAE),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(min_xval,max_val/2-0.1, "Stdev: {:.1f}ft".format(stddev),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(min_xval,max_val/2-0.15, "Max:   {:.1f}ft".format(maxx),fontsize = 1000/scale,va="top")
+        
+        if len(results) > 1:
+            
+            mean = np.mean(data2[didx])
+            MAE  = np.mean(np.abs(data2[didx]))
+            stddev = np.std(data2[didx])
+            maxx = np.max(np.abs(data2[didx]))
+            
+            xv = min_xval + 1.7
+            ax_objs[-1].text(xv,max_val/2,     "({:.1f}ft)".format(mean),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
+            ax_objs[-1].text(xv,max_val/2-0.05,"({:.1f}ft)".format(MAE),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
+            ax_objs[-1].text(xv,max_val/2-0.1, "({:.1f}ft)".format(stddev),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
+            ax_objs[-1].text(xv,max_val/2-0.15,"({:.1f}ft)".format(maxx),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
+
+    plt.tight_layout()
+    gs.update(hspace= -0.2)
+    
+    
+    fig.text(0.5,0.95,"State Error Histograms",fontsize = 2000/scale,ha = "center")
+    return f2a(fig)
+  
+#%% TO BE IMPLEMENTED
+  
+    
+def gen_spiderplot(result,ax,index = (0,0)):
+    ax[index].set_title("Overall Performance Summary")
+
 def list_MOT(result,ax,index = (0,0)):
-    include = ["switches", "fragmentations", "pred_avg_matches","gt_avg_matches"]
-    
-    
-    
-    ax[index].set_title("Other MOT Metrics")
-    
-    
-def state_error(result,ax,index = (0,0)):
     pass
 
-def conf_matrix(result,ax,index = (0,0)):
+
     pass
 
-def unsup_hist(stat,result,ax,index = (0,0)):
+
     pass
 
 def vel_hist(result,ax,index = (0,0)):
@@ -71,38 +529,106 @@ def vel_hist(result,ax,index = (0,0)):
 def unsup_list(result,ax,index = (0,0)):
     pass
 
-def cause_of_death_pie(result,ax,index = (0,0)):
     ax[index].set_title("Cause of Object Death")
 
 
-if __name__ == "__main__":
-    results = [
-        "/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/morose_panda--RAW_GT1.cpkl",
-        "/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/morose_panda--RAW_GT1_reconciled.cpkl"
-        ]
+def gen_pane(results = [],
+             size = [2160,3840],
+             pane_layout = None,
+             pane_functions = None,
+             ):
     
+    """
+    Generates a dashboard layout with each of the specified panes filled by the 
+    corresponding matplotlib plot function
+    results - results dictionary generated by evaluate.py and loaded from pickle file
+    pane_layout - iterable of item size 4 with grid x, grid y, width, height of each pane
+    pane_functions - function used to create matplotlib (or other) figure to fill said pane (takes size as input)
+    color_pallette - np.array.tolist() of size n,3
+    color_spectrum - matplotlib colormap, for functions requiring spectrum - based color
+    
+    Importantly, the size for each plot is computed flexibly based on pane sizes and passed to the corresponding generation function,
+    creating a tight layout - nice!
+    """
+    
+    pad = 20
+    shadow_pad = 18
+    
+    # TODO make pallette color [-1]
+    dashboard = np.zeros([size[0],size[1],3]).astype(np.uint8) + 220
+    
+    # create placeholder panes
+    pane_size = []
+    pane_loc = []
+    for pane in panes:
+        color = color_pallette[-1].tolist()
+        pane_coords = (int(pane[0]*size[0]/9 + pad),int(pane[1]*size[1]/16) + pad), (int((pane[0] + pane[2])*size[0]/9 - pad),int((pane[1] + pane[3])*size[1]/16 - pad))
+        shadow_coords = (int(pane[0]*size[0]/9 + pad),int(pane[1]*size[1]/16) + pad), (int((pane[0] + pane[2])*size[0]/9 - shadow_pad),int((pane[1] + pane[3])*size[1]/16 - shadow_pad))
+
+        pane_size.append([pane_coords[1][0] - pane_coords[0][0], pane_coords[1][1] - pane_coords[0][1]])
+        pane_loc.append(pane_coords)
+        
+        dashboard = cv2.rectangle(dashboard,shadow_coords[0],shadow_coords[1],(190,190,190),-1)
+        dashboard = cv2.rectangle(dashboard,pane_coords[0],pane_coords[1],color,-1)
+    
+    for idx,fn in enumerate(pane_functions):
+        pane_coords = pane_loc[idx]
+        pane_im = fn(results,pane_size[idx])
+        if pane_im is not None:
+            #pane_im = cv2.imload("temp.png")
+            pane_im = cv2.resize(pane_im,pane_size[idx])
+            dashboard[pane_coords[0][1]:pane_coords[1][1],pane_coords[0][0]:pane_coords[1][0],:] = pane_im[:,:,:3]
+        
+    
+    
+    # display image
+    dashboard = cv2.resize(dashboard,(int(size[1]*0.95),int(size[0]*0.95)))
+    cv2.imshow("frame",dashboard)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+def dummy(a,b):
+    pass
+
+if __name__ == "__main__":
+    
+    plt.figure()
+    plt.plot([0,1],[0,1])
+    plt.savefig("test.png")
+    # load each result
+    results = [
+        "/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/morose_panda--RAW_GT1_reconciled.cpkl",
+        "/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/morose_panda--RAW_GT1.cpkl",
+        ]
     for i in range(len(results)):
         with open(results[i],"rb") as f:
             results[i] = pickle.load(f)
+
+    # pane = origin x, origin y, width , height
+    panes = np.array([[0,0,4,1], # Title   # 
+                      [0,1,4,3], # Spider
+                      [0,4,4,2], # History
+                      [0,6,4,3], # Death   #
+
+                      [4,0.5,4,0.5], # Unsupervised Summary     #
+                      [4,1,4,2], # Unsupervised General (List)
+                      [4,3,4,7],  # Unsupervised Histograms
+                      
+                      [8,0.5,8,0.5], # Supervised Summary      #
+                      [8,1,4,4], # MOT metrics (1-norm)        #
+                      [8,5,4,4], # Confusion Matrix            #
+ 
+                      [12,1,4,5], # State error                #  
+                      [12,6,4,3], # Additional Hover Info
+                      ])
     
-    plots = [gen_spiderplot,bar_MOT,list_MOT,state_error,vel_hist,unsup_list,cause_of_death_pie,conf_matrix,]
-    
-    n_r = len(results)
-    n_p = len(plots)
-    # create figure with n_results x n_plots subplots
-    scale = 10
-    fig, ax = plt.subplots(n_r,n_p,figsize = (n_p*scale,n_r*scale))
+    pane_functions = [gen_title,dummy,dummy,death_pie,unsup_title,dummy,dummy,sup_title,bar_MOT,conf_matrix,state_error,dummy]
     
     
-    
-    for i in range(n_r):
-        for j in range(n_p):
-            plots[j](results[i],ax,(i,j))
-    
-    
+    gen_pane(results = results,
+             pane_layout = panes,
+             pane_functions= pane_functions
+             )
     
     
-    
-    
-    
-    fig.show()
+   

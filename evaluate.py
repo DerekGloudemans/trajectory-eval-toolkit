@@ -112,7 +112,7 @@ if __name__ == "__main__":
     collection_cleanup = False
 
     ### overwrite collection_name 
-    coll_name = "morose_panda--RAW_GT1_reconciled"
+    coll_name = "morose_panda--RAW_GT1"
     # generate comment
     comment = input("Description of run settings / test for storage with evaluation results: ")    
 
