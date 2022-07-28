@@ -20,3 +20,4 @@ min_spacing|Min difference in x of all car-following pairs (at the same lane) at
 overlaps|Trajectory pairs whose bboxes overlap at a given timestamp.
 
 
+![](_im/example_dashboard1.png)
