@@ -796,7 +796,7 @@ def history(results,figsize):
 def gen_spiderplot(results,figsize):
     fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
     ax = fig.add_subplot(111,projection="polar")
-    
+    ax.patch.set_facecolor((0.95,0.95,0.95))
     # Bars are sorted by the cumulative track length
     df_keys = list(results[0]["spider"].keys())
     total1 = results[0]["spider"]["Total"] 

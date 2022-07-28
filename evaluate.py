@@ -113,14 +113,10 @@ if __name__ == "__main__":
     collection_cleanup = False
 
     ### overwrite collection_name 
-<<<<<<< Updated upstream
-    coll_name = "morose_panda--RAW_GT1_boggles"
-
-=======
     coll_name = "morose_panda--RAW_GT1_cajoles" ; append_db = False
-    #coll_name = "morose_panda--RAW_GT1_castigates" ; append_db = False
-    #coll_name = "morose_panda--RAW_GT1_boggles" ; append_db = False
-    coll_name = "morose_panda--RAW_GT1"            ; append_db = True
+    coll_name = "morose_panda--RAW_GT1_castigates" ; append_db = False
+    coll_name = "morose_panda--RAW_GT1_boggles" ; append_db = False
+    #coll_name = "morose_panda--RAW_GT1"            ; append_db = True
 
 
     dbw   = DBWriter(db_param,collection_name = db_param["db_name"])
@@ -129,7 +125,6 @@ if __name__ == "__main__":
     [print(item) for item in existing_collections]
         
         
->>>>>>> Stashed changes
     # generate comment
     comment = input("Description of run settings / test for storage with evaluation results: ")    
 

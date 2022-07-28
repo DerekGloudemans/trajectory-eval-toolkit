@@ -73,7 +73,7 @@ def evaluate(db_param,
              append_db = False,
              iou_threshold = 0.3):
     
-    RESULT = {}
+    RESULT = {"postprocessed":True}
     
     gtd   = DBReader(db_param,collection_name = gt_collection)
     prd   = DBReader(db_param,collection_name = pred_collection)

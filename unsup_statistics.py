@@ -198,12 +198,8 @@ class UnsupervisedEvaluator():
         # TODO: put all functions in a separate script
         functions = [_get_duration, _get_x_traveled,
                       _get_y_traveled, _get_max_vx, _get_min_vx,
-<<<<<<< Updated upstream
                       _get_max_vy, _get_min_vy,_get_max_ax,_get_min_ax,_get_avg_vx,_get_avg_vy,_get_avg_ax,
                       _get_lane_changes]
-=======
-                      _get_max_vy, _get_min_vy,_get_max_ax,_get_min_ax,_get_avg_vx,_get_avg_vy,_get_lane_changes,_get_avg_ax]
->>>>>>> Stashed changes
         # functions = [_get_lane_changes]
         
         for fcn in functions:
