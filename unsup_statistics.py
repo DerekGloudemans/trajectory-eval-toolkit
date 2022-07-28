@@ -172,6 +172,12 @@ class UnsupervisedEvaluator():
             try: return max(ddx/(dt**2))
             except: return np.nan
             
+        def _get_avg_ax(traj):
+            ddx = np.diff(traj["x_position"], 2)
+            dt = np.diff(traj["timestamp"])[:-1]
+            try: return np.mean(ddx/(dt**2))
+            except: return np.nan
+            
         def _get_lane_changes(traj):
             '''
             count number of times y position is at another lane according to lane marks
@@ -186,7 +192,8 @@ class UnsupervisedEvaluator():
         # TODO: put all functions in a separate script
         functions = [_get_duration, _get_x_traveled,
                       _get_y_traveled, _get_max_vx, _get_min_vx,
-                      _get_max_vy, _get_min_vy,_get_max_ax,_get_min_ax,_get_avg_vx,_get_avg_vy,_get_lane_changes]
+                      _get_max_vy, _get_min_vy,_get_max_ax,_get_min_ax,_get_avg_vx,_get_avg_vy,_get_avg_ax,
+                      _get_lane_changes]
         # functions = [_get_lane_changes]
         
         for fcn in functions:

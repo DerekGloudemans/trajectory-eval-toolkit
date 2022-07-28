@@ -107,13 +107,10 @@ if __name__ == "__main__":
     collection_cleanup = False
 
     ### overwrite collection_name 
-    coll_name = "morose_panda--RAW_GT1"
+    coll_name = "morose_panda--RAW_GT1_boggles"
     
     # generate comment
     comment = input("Description of run settings / test for storage with evaluation results: ")    
-
-
-
 
         
 
@@ -121,10 +118,7 @@ if __name__ == "__main__":
     existing_collections = dbw.db.list_collection_names() # list all collections
     print(existing_collections)
     
-    
-    
-   
-    
+
     result = {}
     result["name"] = coll_name
     result["description"] = comment
