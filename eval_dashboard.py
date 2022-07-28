@@ -1,10 +1,12 @@
 import matplotlib.pyplot as plt
 import matplotlib.lines as lines
+import matplotlib.dates as mdates
 import _pickle as pickle
 import numpy as np
 import cv2
 import json
 import io
+import os
 
 from scipy.stats.kde import gaussian_kde
 from scipy.stats import norm
@@ -29,6 +31,8 @@ There should also be a supplementary file with, for each metric, a description, 
 """
 
 #%% Globals 
+global results_dir
+results_dir = "/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/"
 
 global dpi
 dpi = 162
@@ -47,6 +51,23 @@ MD = {
     "idr":{"text":"ID-Recall","best":1,"bad":0.5},
     "idp":{"text":"ID-Precision","best":1,"bad":0.5},
     "idf1":{"text":"ID-F1","best":1,"bad":0.5},
+    "avg_ax_raw":{"text":"Average Acceleration"},
+    "avg_vx_raw":{"text":"Average Speed"},
+    "x_traveled_raw":{"text":"Trajectory Length","best":2000,"bad":300},
+    "x_traveled_avg":{"text":"Trajectory Length","best":2000,"bad":300},
+    "bps":{"text":"Hz","best":30,"bad":1},
+    "traj_count":{"text":"Trajectories","best":np.nan},
+    "x_variation":{"text":"X Variation","best":1,"bad":1.2},
+    "y_variation":{"text":"Y Variation","best":0,"bad":50},
+    "duration_avg":{"text": "Duration", "best":np.nan},
+    "percent_backwards":{"text":"Backwards %","best":0,"bad":1},
+    "overlaps_per_object":{"text":"Overlaps/Traj","best":0,"bad":1},
+    "mostly_tracked%":{"text":">80% Tracked","best":1,"bad":0.2},
+    "mostly_lost%":{"text":"<20% Tracked","best":0,"bad":0.4},
+    "num_switches_per_gt":{"text":"Switches per GT","best":0,"bad":2},
+    "num_fragmentations_per_gt":{"text":"Frag per GT","best":0,"bad":2},
+    "pred_avg_matches":{"text":"GT IDs / Pred","best":1,"bad":2},
+    "gt_avg_matches":{"text":"Pred IDs / GT","best":1,"bad":2},
     }
 
 global color_pallette 
@@ -67,12 +88,20 @@ primary_colors = np.array([[117,158,186],
                            [117,158,176],
                            [117,140,186],
                            [110,158,186],
+                           [117,168,186],
+                           [117,158,176],
+                           [117,140,186],
+                           [110,158,186],
                            [117,168,186]])
 
 secondary_colors = np.array([[160,120,120],
-                             [160,125,120],
-                             [170,120,120],
-                             [166,126,120],
+                             [160,129,120],
+                             [180,120,120],
+                             [166,116,120],
+                             [148,120,110],
+                             [160,125,100],
+                             [170,122,120],
+                             [166,116,120],
                              [148,120,120]])
 
 global cmap
@@ -106,7 +135,7 @@ def gen_title(results,figsize):
     name = results[0]["name"]
     iou = results[0]["iou_threshold"]
     comment = results[0]["description"]
-    
+    gt_dataset = results[0]["gt"]
     
     
     
@@ -115,16 +144,16 @@ def gen_title(results,figsize):
     fig.text(0.01,0.8,"Collection: ",fontsize = 2500/scale)
     fig.text(0.25,0.8,"{}".format(name),fontsize = 2500/scale,color = color_pallette[0]/255)
 
-    fig.text(0.01,0.4,"Notable changes:",fontsize = 1500/scale)
-    fig.text(0.25,0.4,"{}".format(comment),fontsize = 1500/scale)
+    fig.text(0.01,0.3,"Notable changes:",fontsize = 1500/scale)
+    fig.text(0.25,0.3,"{}".format(comment),fontsize = 1500/scale,wrap = True, va = "top")
 
-    fig.text(0.01,0.25,"GT IOU:",fontsize = 1500/scale)
-    fig.text(0.25,0.25,"{}".format(iou),fontsize = 1500/scale)
+    fig.text(0.01,0.45,"GT IOU:",fontsize = 1500/scale)
+    fig.text(0.25,0.45,"{} ({})".format(iou,gt_dataset),fontsize = 1500/scale)
 
     if len(results) > 1:
         baseline_name = results[1]["name"]
-        fig.text(0.01,0.1,"Baseline: ",fontsize = 1500/scale)
-        fig.text(0.25,0.1,"{}".format(baseline_name),fontsize = 1500/scale,color = color_pallette[1]/255)
+        fig.text(0.01,0.6,"Baseline: ",fontsize = 1500/scale)
+        fig.text(0.25,0.6,"{}".format(baseline_name),fontsize = 1500/scale,color = color_pallette[1]/255)
 
     return f2a(fig)
 
@@ -163,9 +192,9 @@ def bar_MOT(results,figsize):
         name = []
         val = []
         for met in include:
-            if met in result["metrics"]:
+            if met in result:
                 name.append(met)
-                val.append(result["metrics"][met])
+                val.append(result[met])
     
         x_pos = np.arange(len(name))
         ax.barh(x_pos,val, align='center', color = color_pallette[ridx]/255, alpha=0.3)
@@ -205,7 +234,7 @@ def bar_MOT(results,figsize):
 
 def conf_matrix(result,figsize):    
     n_c = len(classmap)
-    confusion_matrix = result[0]["metrics"]["confusion_matrix"].data.numpy()[:n_c,:n_c] #* 1000 
+    confusion_matrix = result[0]["confusion_matrix"].data.numpy()[:n_c,:n_c] #* 1000 
     #plot confusion matrix
     sums = np.sum(confusion_matrix,axis= 0)
     sumss = sums[:,np.newaxis]
@@ -259,7 +288,7 @@ def death_pie(results,figsize):
     fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
     ax = fig.add_subplot(111)
     
-    data = results[0]["metrics"]["cause_of_death"]
+    data = results[0]["cause_of_death"]
     
     labels = list(data.keys())
     vals = list(data.values())
@@ -276,126 +305,12 @@ def death_pie(results,figsize):
 
     
     ax.pie(vals, explode=explode, labels=labels, autopct='%1.1f%%', colors = colors, textprops={'fontsize': 1400/scale},
-            shadow=True, startangle=90)
+            shadow=True, startangle=90, wedgeprops={"alpha":0.5})
     ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
     
     fig.text(0.5,0.95,"Object Cause of Death",fontsize = 2000/scale,ha = "center")
 
     return f2a(fig)
-
-def unsup_hist(results,figsize):
-    to_plot = ["x_traveled","avg_vx","max_ax"]
-    
-    fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
-    # ax = fig.add_subplot(111)
-    # ax.spines.top.set_visible(False)
-    # ax.spines.left.set_visible(True)
-    # ax.spines.right.set_visible(False)
-    
-    # get data
-    data = [results[0]["statistics"][key]["raw"] for key in to_plot]
-    data = np.stack(data)
-    #xx = np.arange(-8,8,0.05)
-    data_pdf = []
-    for i in range(data.shape[0]):
-        pdf = gaussian_kde(data[i])
-        xx = np.arange(np.min(data[i]),np.max(data[i]),1)
-        data_pdf.append([xx,pdf(xx)])
-    #data_pdf = np.stack(data_pdf)
-    
-    if len(results) > 1:
-        data2 = [results[0]["statistics"][key]["raw"] for key in to_plot]
-        data2 = np.stack(data2)
-        data2_pdf = []
-        for i in range(data2.shape[0]):
-            pdf = gaussian_kde(data2[i])
-            xx = np.arange(np.min(data2[i]),np.max(data2[i]),1)
-            data2_pdf.append([xx,pdf(xx)])
-        data2_pdf = np.stack(data2_pdf)
-        
-    max_val = 1 #np.max(data_pdf)
-    min_xval = min(xx)
-    
-    gs = (grid_spec.GridSpec(len(data),1))
-    
-    #creating empty list
-    ax_objs = []
-    for didx in range(len(data_pdf)):
-        # creating new axes object and appending to ax_objs
-        ax_objs.append(fig.add_subplot(gs[didx:didx+1, 0:]))
-    
-        # plotting the distribution
-        # filling the space beneath the distribution
-        if len(results) > 1:
-            ax_objs[-1].fill_between(xx,data2_pdf[didx],alpha = 1,color = color_pallette[1]/255)
-        
-        ax_objs[-1].fill_between(xx,data_pdf[didx],alpha = 0.5,color = color_pallette[0]/255)
-        
-        ax_objs[-1].plot(xx,data_pdf[didx],color = "black",linewidth = 2)
-        ax_objs[-1].plot(xx,data2_pdf[didx],color = color_pallette[1]/255)
-
-
-    
-        # setting uniform x and y lims
-        ax_objs[-1].set_xlim(min(xx),max(xx))
-        ax_objs[-1].set_ylim(0,max_val)
-    
-        # make background transparent
-        rect = ax_objs[-1].patch
-        rect.set_alpha(0)
-        
-        # remove borders, axis ticks, and labels
-        ax_objs[-1].set_yticklabels([])
-        ax_objs[-1].set_yticks([])
-        ax_objs[-1].set_ylabel('')
-        
-        if didx == data.shape[0]-1:
-            ax_objs[-1].tick_params(axis='x', labelsize=1000/scale,length = 500/scale )
-            ax_objs[-1].set_xlabel("Error Distribution (ft)", fontsize = 1500/scale)
-        else:
-            ax_objs[-1].set_xticklabels([])
-            ax_objs[-1].tick_params(axis='x', length = 200/scale )
-
-        
-        spines = ["top","right","left"]#,"bottom"]
-        for s in spines:
-            ax_objs[-1].spines[s].set_visible(False)
-        ax_objs[-1].text(min_xval,max_val/2,state_names[didx],fontweight="bold",fontsize = 1500/scale,va="bottom")
-        
-        ax_objs[-1].axvline(x = 0, ymax = 0.8, linestyle = ":",color = (0.2,0.2,0.2))
-        
-        
-        # get mean,MAE, stddev, max
-        mean = np.mean(data[didx])
-        MAE  = np.mean(np.abs(data[didx]))
-        stddev = np.std(data[didx])
-        maxx = np.max(np.abs(data[didx]))
-        
-        ax_objs[-1].text(min_xval,max_val/2,     "Mean:  {:.1f}ft".format(mean),fontsize = 1000/scale,va="top")
-        ax_objs[-1].text(min_xval,max_val/2-0.05,"MAE:   {:.1f}ft".format(MAE),fontsize = 1000/scale,va="top")
-        ax_objs[-1].text(min_xval,max_val/2-0.1, "Stdev: {:.1f}ft".format(stddev),fontsize = 1000/scale,va="top")
-        ax_objs[-1].text(min_xval,max_val/2-0.15, "Max:   {:.1f}ft".format(maxx),fontsize = 1000/scale,va="top")
-        
-        if len(results) > 1:
-            
-            mean = np.mean(data2[didx])
-            MAE  = np.mean(np.abs(data2[didx]))
-            stddev = np.std(data2[didx])
-            maxx = np.max(np.abs(data2[didx]))
-            
-            xv = min_xval + 1.7
-            ax_objs[-1].text(xv,max_val/2,     "({:.1f}ft)".format(mean),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
-            ax_objs[-1].text(xv,max_val/2-0.05,"({:.1f}ft)".format(MAE),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
-            ax_objs[-1].text(xv,max_val/2-0.1, "({:.1f}ft)".format(stddev),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
-            ax_objs[-1].text(xv,max_val/2-0.15,"({:.1f}ft)".format(maxx),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
-
-    plt.tight_layout()
-    gs.update(hspace= -0.2)
-    
-    
-    fig.text(0.5,0.95,"State Error Histograms",fontsize = 2000/scale,ha = "center")
-    return f2a(fig)
-
 
 def state_error(results,figsize):
     state_names = ["X Position","Y Position", "Length", "Width", "Height"]
@@ -407,7 +322,7 @@ def state_error(results,figsize):
     # ax.spines.right.set_visible(False)
     
     # get data
-    data = results[0]["metrics"]["state_error"]
+    data = results[0]["state_error"]
     xx = np.arange(-8,8,0.05)
     data = data.transpose(1,0)
     data_pdf = []
@@ -417,7 +332,7 @@ def state_error(results,figsize):
     data_pdf = np.stack(data_pdf)
     
     if len(results) > 1:
-        data2 = results[1]["metrics"]["state_error"]
+        data2 = results[1]["state_error"]
         data2 = data2.transpose(1,0)
         data2_pdf = []
         for i in range(data2.shape[0]):
@@ -483,10 +398,10 @@ def state_error(results,figsize):
         stddev = np.std(data[didx])
         maxx = np.max(np.abs(data[didx]))
         
-        ax_objs[-1].text(min_xval,max_val/2,     "Mean:  {:.1f}ft".format(mean),fontsize = 1000/scale,va="top")
-        ax_objs[-1].text(min_xval,max_val/2-0.05,"MAE:   {:.1f}ft".format(MAE),fontsize = 1000/scale,va="top")
-        ax_objs[-1].text(min_xval,max_val/2-0.1, "Stdev: {:.1f}ft".format(stddev),fontsize = 1000/scale,va="top")
-        ax_objs[-1].text(min_xval,max_val/2-0.15, "Max:   {:.1f}ft".format(maxx),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(min_xval,max_val/2,                "Mean:  {:.1f}ft".format(mean),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(min_xval,max_val/2-(0.05*max_val), "MAE:   {:.1f}ft".format(MAE),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(min_xval,max_val/2-(0.1*max_val),  "Stdev: {:.1f}ft".format(stddev),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(min_xval,max_val/2-(0.15*max_val), "Max:   {:.1f}ft".format(maxx),fontsize = 1000/scale,va="top")
         
         if len(results) > 1:
             
@@ -496,10 +411,10 @@ def state_error(results,figsize):
             maxx = np.max(np.abs(data2[didx]))
             
             xv = min_xval + 1.7
-            ax_objs[-1].text(xv,max_val/2,     "({:.1f}ft)".format(mean),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
-            ax_objs[-1].text(xv,max_val/2-0.05,"({:.1f}ft)".format(MAE),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
-            ax_objs[-1].text(xv,max_val/2-0.1, "({:.1f}ft)".format(stddev),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
-            ax_objs[-1].text(xv,max_val/2-0.15,"({:.1f}ft)".format(maxx),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
+            ax_objs[-1].text(xv,max_val/2,               "({:.1f}ft)".format(mean),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
+            ax_objs[-1].text(xv,max_val/2-(0.05*max_val),"({:.1f}ft)".format(MAE),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
+            ax_objs[-1].text(xv,max_val/2-(0.1*max_val), "({:.1f}ft)".format(stddev),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
+            ax_objs[-1].text(xv,max_val/2-(0.15*max_val),"({:.1f}ft)".format(maxx),fontsize = 1000/scale,va="top", color= color_pallette[1]/255)
 
     plt.tight_layout()
     gs.update(hspace= -0.2)
@@ -508,29 +423,464 @@ def state_error(results,figsize):
     fig.text(0.5,0.95,"State Error Histograms",fontsize = 2000/scale,ha = "center")
     return f2a(fig)
   
-#%% TO BE IMPLEMENTED
-  
+def unsup_hist(results,figsize):
+    to_plot = ["x_traveled_raw","avg_vx_raw","avg_ax_raw"]
+    units = ["ft","ft/s","ft/$s^2$"]
+    xrange_clip = [[-500,2000],[-10,200],[-200,200]]
     
-def gen_spiderplot(result,ax,index = (0,0)):
-    ax[index].set_title("Overall Performance Summary")
+    fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
+    # ax = fig.add_subplot(111)
+    # ax.spines.top.set_visible(False)
+    # ax.spines.left.set_visible(True)
+    # ax.spines.right.set_visible(False)
+    
+    # get data
+    data = [results[0][key] for key in to_plot]
+    data = np.stack(data)
+    #xx = np.arange(-8,8,0.05)
+    data_pdf = []
+    for i in range(data.shape[0]):
+        pdf = gaussian_kde(data[i])
+        xx = np.arange(np.min(data[i]),np.max(data[i]),1)
+        data_pdf.append([xx,pdf(xx)])
+    #data_pdf = np.stack(data_pdf)
+    
+    if len(results) > 1:
+        data2 = [results[1][key] for key in to_plot]
+        data2 = np.stack(data2)
+        data2_pdf = []
+        for i in range(data2.shape[0]):
+            pdf = gaussian_kde(data2[i])
+            xx = np.arange(np.min(data2[i]),np.max(data2[i]),1)
+            data2_pdf.append([xx,pdf(xx)])
+        #data2_pdf = np.stack(data2_pdf)
+    
+    gs = (grid_spec.GridSpec(len(data),1))
+    
+    #creating empty list
+    ax_objs = []
+    for didx in range(len(data_pdf)):
+        xx,dataD = data_pdf[didx]
+        # creating new axes object and appending to ax_objs
+        ax_objs.append(fig.add_subplot(gs[didx:didx+1, 0:]))
+        
+        max_val = np.max(dataD)
+        xr = [min(xx),max(xx)]
 
-def list_MOT(result,ax,index = (0,0)):
-    pass
+        # plotting the distribution
+        # filling the space beneath the distribution
+        if len(results) > 1:
+            xx2,dataD2 = data2_pdf[didx]
+            ax_objs[-1].fill_between(xx2,dataD2,alpha = 1,color = color_pallette[1]/255)
+            ax_objs[-1].plot(xx2,dataD2,color = color_pallette[1]/255)
+            
+            max_val = max(np.max(dataD),np.max(dataD2))
+            xr = [min(min(xx),min(xx2)),max(max(xx),max(xx2))]
+            
+        ax_objs[-1].fill_between(xx,dataD,alpha = 0.5,color = color_pallette[0]/255)
+        ax_objs[-1].plot(xx,dataD,color = "black",linewidth = 2)
 
 
-    pass
+    
+        # setting uniform x and y lims
+        xr[0] = max(xr[0],xrange_clip[didx][0])
+        xr[1] = min(xr[1],xrange_clip[didx][1])
+
+        ax_objs[-1].set_xlim(xr[0],xr[1])
+        ax_objs[-1].set_ylim(0,max_val)
+    
+        # make background transparent
+        rect = ax_objs[-1].patch
+        rect.set_alpha(0)
+        
+        # remove borders, axis ticks, and labels
+        ax_objs[-1].set_yticklabels([])
+        ax_objs[-1].set_yticks([])
+        ax_objs[-1].set_ylabel('')
+        
+        #if didx == data.shape[0]-1:
+        ax_objs[-1].tick_params(axis='x', labelsize=1000/scale,length = 500/scale )
+        ax_objs[-1].set_xlabel("Distribution ({})".format(units[didx]), fontsize = 1500/scale)
+        # else:
+        #     ax_objs[-1].set_xticklabels([])
+        #     ax_objs[-1].tick_params(axis='x', length = 200/scale )
+
+        
+        spines = ["top","right","left"]#,"bottom"]
+        for s in spines:
+            ax_objs[-1].spines[s].set_visible(False)
+        ax_objs[-1].text(xr[0],max_val/2,MD[to_plot[didx]]["text"],fontweight="bold",fontsize = 1500/scale,va="bottom")
+        #ax_objs[-1].axvline(x = 0, ymax = 0.8, linestyle = ":",color = (0.2,0.2,0.2))
+        
+        
+        # get mean,MAE, stddev, max
+        mean = np.mean(data[didx])
+        MA  = np.mean(np.abs(data[didx]))
+        stddev = np.std(data[didx])
+        maxx = np.max(np.abs(data[didx]))
+        
+        xv = xr[0] #+  0.2*(xr[1] - xr[0])
+        ax_objs[-1].text(xv,max_val/2,               "Mean:     {:.1f}{}".format(mean,units[didx]),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(xv,max_val/2-(0.05*max_val),"Mean Abs: {:.1f}{}".format(MA,units[didx]),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(xv,max_val/2-(0.1*max_val), "Stdev:    {:.1f}{}".format(stddev,units[didx]),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(xv,max_val/2-(0.15*max_val),"Max:      {:.1f}{}".format(maxx,units[didx]),fontsize = 1000/scale,va="top")
+        
+        if len(results) > 1:
+            mean = np.mean(data2[didx])
+            MA  = np.mean(np.abs(data2[didx]))
+            stddev = np.std(data2[didx])
+            maxx = np.max(np.abs(data2[didx]))
+            
+            xv = xr[0] + 0.16*(xr[1] - xr[0])
+            # may need a black border
+            
+            ax_objs[-1].text(xv,max_val/2,     " ({:.1f}{})".format(mean,units[didx]),fontsize = 1000/scale,va="top",ha="left", color=color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
+            ax_objs[-1].text(xv,max_val/2-(0.05*max_val)," ({:.1f}{})".format(MA,units[didx]),fontsize = 1000/scale,va="top",ha="left", color= color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
+            ax_objs[-1].text(xv,max_val/2-(0.1*max_val), " ({:.1f}{})".format(stddev,units[didx]),fontsize = 1000/scale,va="top",ha="left", color= color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
+            ax_objs[-1].text(xv,max_val/2-(0.15*max_val)," ({:.1f}{})".format(maxx,units[didx]),fontsize = 1000/scale,va="top",ha="left", color= color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
+
+    plt.tight_layout()
+    gs.update(hspace= -0.2)
+    
+    
+    fig.text(0.5,0.95,"Trajectory Attribute Histograms",fontsize = 2000/scale,ha = "center")
+    return f2a(fig)
+
+def chart_MOT(results,figsize):
+    c_scale = 50000
+    
+    fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
+    ax = fig.add_subplot(111)
+    ax.set_position([0,0,1,1])
+    ax.axis("off")
+
+    # assemble list of metrics with ideal value (or -1 if none), new value, [old value]
+    to_list = ["mostly_tracked%","mostly_lost%","num_switches_per_gt","num_fragmentations_per_gt","pred_avg_matches","gt_avg_matches"]
+    coll_names = [result["name"] for result in results]
+    cell_text = []
+    
+    
+    data = np.zeros([len(to_list),len(coll_names)+1])
+    
+    print(results[0].keys())
+    
+    for qidx,quant in enumerate(to_list):
+        row_text = []
+        for ridx,result in enumerate(results):
+            if quant in result.keys():
+                data[qidx,ridx] = result[quant]
+            else:
+                data[qidx,ridx] = np.nan
+        data[qidx,-1] = MD[quant]["best"]
+    
+    # normalize data by max data[:,0]
+    data_norm = data / np.max(data[:,:2],axis = 1)[:,None]
+    data_norm = data_norm.clip(0.001)
+    
+    w2h = figsize[0] / figsize[1]
+    
+    ns = len(to_list)
+    nr = np.ceil(np.sqrt(ns/w2h)) 
+    nc = np.ceil(  ns/nr)
+    
+    assert nc*nr >=ns, "Not enough cells for data"
+    
+    for idx in range(ns):
+        for didx in range(len(results)-1,-1,-1):
+            ax.scatter(idx//nr,idx%nr,s=data_norm[idx,didx]*c_scale,color = [color_pallette[didx]/255], alpha = 0.6)
+        
+        
+        tshift = 0.2
+        ax.text(idx//nr,idx%nr+tshift,MD[to_list[idx]]["text"],va="bottom",ha="center", fontsize = 1500/scale)
+        txt = "{:.2f} ".format(data[idx,0])
+        ax.text(idx//nr,idx%nr+tshift,txt,va="top",ha="right", fontsize = 1000/scale)
+    
+        if len(results) > 1:
+            txt = " $\leftarrow$ ({:.2f})".format(data[idx,1])
+            ax.text(idx//nr,idx%nr+tshift,txt,va="top",ha="left", fontsize = 1000/scale)
+           
+        best = data_norm[idx,2]
+        if not np.isnan(best):
+            # if best == 0:
+            #     best += 0.0001
+            ax.scatter(idx//nr,idx%nr,s=best*c_scale,facecolors='none', edgecolors=[0,0,0],linewidth = 2)
+    
+    ax.set_xlim([-0.5,nc-0.5])
+    ax.set_ylim([-0.5,nr-0.3])
+    
+    return f2a(fig)
+
+def chart_unsup(results,figsize):
+    
+    c_scale = 50000
+    
+    fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
+    ax = fig.add_subplot(111)
+    ax.set_position([0,0,1,1])
+    ax.axis("off")
+
+    # assemble list of metrics with ideal value (or -1 if none), new value, [old value]
+    to_list = ["traj_count","bps","x_variation","y_variation","duration_avg","x_traveled_avg","percent_backwards","overlaps_per_object"]
+    coll_names = [result["name"] for result in results]
+    cell_text = []
+    
+    
+    data = np.zeros([len(to_list),len(coll_names)+1])
+    
+    
+    
+    for qidx,quant in enumerate(to_list):
+        row_text = []
+        for ridx,result in enumerate(results):
+            if quant in result.keys():
+                data[qidx,ridx] = result[quant]
+            else:
+                data[qidx,ridx] = np.nan
+        data[qidx,-1] = MD[quant]["best"]
+    
+    # normalize data by max data[:,0]
+    data_norm = data / np.max(data[:,:2],axis = 1)[:,None]
+    data_norm = data_norm.clip(0.001)
+    
+    w2h = figsize[0] / figsize[1]
+    
+    ns = len(to_list)
+    nr = np.ceil(np.sqrt(ns/w2h)) 
+    nc = np.ceil(  ns/nr)
+    
+    assert nc*nr >=ns, "Not enough cells for data"
+    
+    for idx in range(ns):
+        for didx in range(len(results)-1,-1,-1):
+            ax.scatter(idx//nr,idx%nr,s=data_norm[idx,didx]*c_scale,color = [color_pallette[didx]/255], alpha = 0.6)
+        
+        
+        tshift = 0.2
+        ax.text(idx//nr,idx%nr+tshift,MD[to_list[idx]]["text"],va="bottom",ha="center", fontsize = 1500/scale)
+        txt = "{:.2f} ".format(data[idx,0])
+        ax.text(idx//nr,idx%nr+tshift,txt,va="top",ha="right", fontsize = 1000/scale)
+    
+        if len(results) > 1:
+            txt = " $\leftarrow$ ({:.2f})".format(data[idx,1])
+            ax.text(idx//nr,idx%nr+tshift,txt,va="top",ha="left", fontsize = 1000/scale)
+           
+        best = data_norm[idx,2]
+        if not np.isnan(best):
+            # if best == 0:
+            #     best += 0.0001
+            ax.scatter(idx//nr,idx%nr,s=best*c_scale,facecolors='none', edgecolors=[0,0,0],linewidth = 2)
+    
+    ax.set_xlim([-0.5,nc-0.5])
+    ax.set_ylim([-0.5,nr-0.3])
+    
+    return f2a(fig)
+
+def history(results,figsize):
+    """
+    Collect all results within the given directory (same directory as results comes from)
+    For each, determine whether calculated on same GT
+    If so, get date (x_axis)
+    Get aggregate score (y-axis)
+    Get framerate (dot size)
+    
+    Scatter each (hollow if raw and solid if post-processed)
+    Plot tie-lines from raw collectio to all post-processed collections
+    
+    Repeat plot of baseline and primary collections in correct colors
+    """
+    secondary_scale_power = 14
+    PSCALE = 3**secondary_scale_power
+
+    primary_metric = "Total"
+    secondary_metric = "mota"
+    
+    names = []
+    primaries = []
+    secondaries = []
+    raw_names = []
+    datetimes = []
+    postprocessed = []
+    
+    for coll in os.listdir(results_dir):
+        
+        
+        with open(os.path.join(results_dir,coll),"rb") as f:
+            hist_result = pickle.load(f)
+        hist_gt_coll = hist_result["gt"]
+        if hist_gt_coll == results[0]["gt"]: # only keep results on same GT
+            primaries.append(hist_result["spider"][primary_metric])
+            secondaries.append(hist_result[secondary_metric])            
+            names.append(coll.split(".")[0])
+            raw_names.append(coll.split(".")[0].split("--")[0])
+            datetimes.append(hist_result["gen_time"])
+            postprocessed.append(hist_result["postprocessed"])
+    
+    fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
+    ax = fig.add_subplot(111)
+    
+    rn = max(primaries) - min(primaries)
+    for idx in range(len(names)):
+        x = datetimes[idx]
+        y = primaries[idx]
+        s = PSCALE * np.power(secondaries[idx],secondary_scale_power)
+        color =  color_pallette[idx%len(color_pallette)]/255
+        fc= color if postprocessed[idx] else "none"
+        plt.scatter(x,y,s,facecolor = fc,alpha = secondaries[idx])
+        if not postprocessed[idx]:
+            plt.scatter(x,y,s,linewidth = 2,edgecolor =  (.3,.3,.3),facecolor = fc)
+
+        text_name = names[idx].split("_")[-1] if postprocessed[idx] else raw_names[idx]
+        plt.text(x,y+0.07*(rn),text_name,va = "bottom", ha = "center",fontsize = 1000/scale)
+    
+    # plot ties
+    for i in range(len(names)):
+        for j in range(len(names)):
+            if postprocessed[i] and not postprocessed[j] and raw_names[i] == raw_names[j]: 
+                x = [datetimes[i],datetimes[j]]
+                y = [primaries[i],primaries[j]]
+                plt.plot(x,y,linestyle = ":", color = (.3,.3,.3),linewidth = 1)
+   
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    ax.xaxis.set_major_locator(mdates.DayLocator(interval=7))
+    
+    ax.spines["top"].set_visible(False)
+    ax.spines["left"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    ax.set_ylabel("Aggregate Score",fontsize = 1500/scale)
+    ax.set_xlabel("Date",fontsize = 1500/scale)
+    ax.set_yticklabels([])
+    ax.set_yticks([])
+    ax.tick_params(axis='x', labelsize=1000/scale, length = 10,labelrotation = 45 )
+    ax.set_ylim([min(primaries)-0.25,max(primaries) + 0.25])
+    
+    
+    # replot primary
+    prim = results[0]["spider"][primary_metric]
+    second = results[0][secondary_metric]
+    date = results[0]["gen_time"]
+    post = results[0]["postprocessed"]
+    s = PSCALE * np.power(second,secondary_scale_power)
+    fc = color_pallette[0]/255 if post else "none"
+    lw =  4
+    edge_color = color_pallette[0] / 255
+    plt.scatter(date,prim,s,linewidth = lw,edgecolor =  edge_color,facecolor = fc)
+    
+    
+    # replot  secondary
+    if len(results) > 1:
+        prim = results[1]["spider"][primary_metric]
+        second = results[1][secondary_metric]
+        date = results[1]["gen_time"]
+        post = results[1]["postprocessed"]
+        s = PSCALE * np.power(second,secondary_scale_power)
+        fc = color_pallette[1]/255 if post else "none"
+        lw =  4
+        edge_color = color_pallette[1] / 255
+        plt.scatter(date,prim,s,linewidth = lw,edgecolor =  edge_color,facecolor = fc)
+    
+    fig.subplots_adjust(bottom=0.25)
+    
+    best_idx = np.argmax(np.array(primaries))
+    best_coll= names[best_idx]
+    best_text= "Current Best Result: {} ({:.1f})".format(best_coll,primaries[best_idx])
+    
+    fig.text(0.02,0.98,best_text, va = "top", fontsize = 1000/scale)
+
+    
+    return f2a(fig)
 
 
-    pass
 
-def vel_hist(result,ax,index = (0,0)):
-    unsup_hist("avg_vx",result,ax,index)
 
-def unsup_list(result,ax,index = (0,0)):
-    pass
+def gen_spiderplot(results,figsize):
+    fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
+    ax = fig.add_subplot(111,projection="polar")
+    
+    # Bars are sorted by the cumulative track length
+    df_keys = list(results[0]["spider"].keys())
+    total1 = results[0]["spider"]["Total"] 
+    df_keys.remove("Total")
+    
+    df_sorted = [results[0]["spider"][key] + 0.01 for key in df_keys]
+    
+    if len(results) > 1:
+        df2_sorted = [results[1]["spider"][key] + 0.01 for key in df_keys]
+        total2 = results[1]["spider"]["Total"] 
 
-    ax[index].set_title("Cause of Object Death")
+    # Values for the x axis
+    ANGLES = np.linspace(0.05, 2 * np.pi - 0.05, len(df_sorted), endpoint=False)
+    
+    # Cumulative length
+    LENGTHS = df_sorted
 
+    
+    ax.set_theta_offset(0* np.pi / 2)
+    ax.set_ylim(-0.2,1)
+    
+    # Add geometries to the plot -------------------------------------
+    # See the zorder to manipulate which geometries are on top
+    
+    # Add bars to represent the cumulative track lengths
+    if len(results) > 1:
+        ax.bar(ANGLES+ 0.15*(2*np.pi/len(df_sorted)), df2_sorted, color=secondary_colors/255, alpha=0.6, width=0.52, zorder=10)
+    ax.bar(ANGLES, LENGTHS, color=primary_colors/255, alpha=0.7, width=0.52, zorder=10)
+    
+
+    
+    # Add dashed vertical lines. These are just for nicely dividing things
+    ax.vlines(ANGLES+ 0.5*(2*np.pi/len(df_sorted)), 0, 1, color=[0,0,0], ls=(0, (4, 4)), zorder=11)
+    
+    # Add dots to represent the mean gain
+    #ax.scatter(ANGLES, df_sorted, s=60, color=[0,0,0], zorder=11)
+    
+    # Remove unnecesary guides ---------------------------------------
+
+    # Remove lines for polar axis (x)
+    #ax.xaxis.grid(False)
+    
+    # Put grid lines for radial axis 
+    ax.set_yticklabels([])
+    y_ticks = [0.2,0.4,0.6,0.8,1]
+    ax.set_yticks(y_ticks)
+    
+    # Add custom annotations -----------------------------------------
+    # The following represent the heights in the values of the y axis
+    # for tval in y_ticks:
+    #     ax.text(np.pi / 2, tval, "{:.1f}".format(tval), ha="center", size=1000/scale)
+    
+    # Remove spines
+    ax.spines["start"].set_color("none")
+    ax.spines["polar"].set_color("none")
+    
+    
+    # Adjust padding of the x axis labels ----------------------------
+    # This is going to add extra space around the labels for the 
+    # ticks of the x axis.
+    XTICKS = ax.xaxis.get_major_ticks()
+    for tick in XTICKS:
+        tick.set_pad(20)
+
+    # Set the labels
+    ax.set_xticks(ANGLES)# + 0.5*(2*np.pi/len(df_sorted)))
+    ax.set_xticklabels(df_keys, size=1500/scale)
+
+    
+    # annotate each score component
+    for idx in range(len(df_keys)):
+        ax.text(ANGLES[idx],0.5,"{:.2f}".format(df_sorted[idx]),size = 1500/scale,zorder = 100)
+
+    fig.subplots_adjust(top=0.8)
+    ly = 0.83
+    fig.text(0.03,ly,"{:.1f}".format(total1),fontsize = 7000/scale, va = "bottom", ha = "left",color = color_pallette[0]/255)
+    fig.text(0.03,ly," aggregate score",fontsize = 2000/scale, va = "top", ha = "left")
+
+    if len(results) > 1:
+        fig.text(0.97,ly,"{:.1f}".format(total2),fontsize = 7000/scale, va = "bottom", ha = "right",color = color_pallette[1]/255)
+        fig.text(0.97,ly," baseline score",fontsize = 2000/scale, va = "top", ha = "right")
+
+    fig.text(0.01,0.01,"Note: Each component is weighted to calculate aggregate score", va = "bottom", fontsize = 1000/scale)
+    return f2a(fig)    
 
 def gen_pane(results = [],
              size = [2160,3840],
@@ -586,10 +936,17 @@ def gen_pane(results = [],
     cv2.imshow("frame",dashboard)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
-
+    
+    cv2.imwrite("temp_dash.png",dashboard)
+    
 def dummy(a,b):
     pass
 
+
+
+
+#%% TO BE IMPLEMENTED
+    
 if __name__ == "__main__":
     
     plt.figure()
@@ -597,7 +954,7 @@ if __name__ == "__main__":
     plt.savefig("test.png")
     # load each result
     results = [
-        "/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/morose_panda--RAW_GT1_reconciled.cpkl",
+        "/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/morose_panda--RAW_GT1_castigates.cpkl",
         "/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/morose_panda--RAW_GT1.cpkl",
         ]
     for i in range(len(results)):
@@ -612,22 +969,23 @@ if __name__ == "__main__":
 
                       [4,0.5,4,0.5], # Unsupervised Summary     #
                       [4,1,4,2], # Unsupervised General (List)
-                      [4,3,4,7],  # Unsupervised Histograms
+                      [4,3,4,6],  # Unsupervised Histograms     #
                       
                       [8,0.5,8,0.5], # Supervised Summary      #
                       [8,1,4,4], # MOT metrics (1-norm)        #
                       [8,5,4,4], # Confusion Matrix            #
  
                       [12,1,4,5], # State error                #  
-                      [12,6,4,3], # Additional Hover Info
+                      [12,6,4,2], # MOT chart
+                      [12,8,4,1], # Additional Hover Info
                       ])
     
-    pane_functions = [gen_title,dummy,dummy,death_pie,unsup_title,dummy,dummy,sup_title,bar_MOT,conf_matrix,state_error,dummy]
+    pane_functions = [gen_title,gen_spiderplot,history,death_pie,unsup_title,chart_unsup,unsup_hist,sup_title,bar_MOT,conf_matrix,state_error,chart_MOT,dummy]
     
     
     gen_pane(results = results,
              pane_layout = panes,
-             pane_functions= pane_functions
+             pane_functions= pane_functions,
              )
     
     

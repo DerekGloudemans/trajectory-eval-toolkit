@@ -209,6 +209,7 @@ def evaluate(db_param,
     pred_dict = {}
     for item in preds:
         if type(item["length"]) == list:
+            RESULT["postprocessed"] = False
             item["length"] = statistics.median(item["length"])
             item["width"] = statistics.median(item["width"])
             item["height"] = statistics.median(item["height"])
@@ -276,7 +277,7 @@ def evaluate(db_param,
     for metric in summary:
         RESULT[metric] = summary[metric][0]
     RESULT["true_negative_rate"] = 1.0
-    RESULT["total_gt"] = TP + FN
+    RESULT["total_gt_annotations"] = TP + FN
         
     # Now parse events into matchings
     #events = acc.events.values.tolist()
@@ -346,7 +347,7 @@ def evaluate(db_param,
     total_gt = len(gt_dict)
     total_pred = len(pred_dict)
     
-    RESULT["x_variation"] = diffx/total_pred
+    RESULT["x_variation"] = diffx/travelled
     RESULT["y_variation"] = diffy/total_pred
     
     
@@ -441,6 +442,25 @@ def evaluate(db_param,
         else:
             COD[death] += 1
     RESULT["cause_of_death"] = COD
+    
+    
+    # get per-instance dimension standard deviation
+    
+    
+    
+    # A few more
+    n_pred = len(preds)
+    n_gt   = len(gts)
+    RESULT["n_gt"]   = n_gt
+    RESULT["n_pred"] = n_pred
+    
+    RESULT["num_switches_per_gt"] = RESULT["num_switches"]/n_gt
+    RESULT["num_fragmentations_per_gt"] = RESULT["num_fragmentations"]/n_gt
+    RESULT["mostly_tracked%"] = RESULT["mostly_tracked"]/n_gt
+    RESULT["mostly_lost%"] = RESULT["mostly_lost"]/n_gt
+    RESULT["partially_tracked%"] = RESULT["partially_tracked"]/n_gt
+
+    RESULT["gen_time"] = preds[0]["_id"].generation_time   
     
     return  RESULT
 
