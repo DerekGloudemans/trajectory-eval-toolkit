@@ -101,6 +101,11 @@ db_param = {
       "timestamp_database":"transformed"
       }
 
+metric_info_dict = {
+    "precision":{"best":1,"bad":0.5},
+    "recall":{"best":1,"bad":0.5},
+    }
+
 if __name__ == "__main__":
     gt_coll = "groundtruth_scene_1"
     IOUT = 0.3
@@ -108,7 +113,7 @@ if __name__ == "__main__":
 
     ### overwrite collection_name 
     coll_name = "morose_panda--RAW_GT1_boggles"
-    
+
     # generate comment
     comment = input("Description of run settings / test for storage with evaluation results: ")    
 

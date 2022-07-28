@@ -417,8 +417,8 @@ def evaluate(db_param,
     pred_no_matches /= len(pred_dict)
     pred_avg_assigned_matches = sum(pred_assigned_id_count)/len(pred_assigned_id_count)
     
-    RESULT["gt_no_match"]      = gt_no_matches
-    RESULT["pred_no_match"]    = pred_no_matches
+    RESULT["gt_match"]      =    1 - gt_no_matches
+    RESULT["pred_match"]    = 1 - pred_no_matches
     RESULT["pred_avg_matches"] = pred_avg_assigned_matches
     RESULT["gt_avg_matches"]   = gt_avg_assigned_matches
     
@@ -426,8 +426,8 @@ def evaluate(db_param,
     print("\n")
     print("Class confusion matrix:")
     
-    vec = confusion_matrix.sum(dim = 1) # total number of gts per class
-    confusion_matrix /= (vec.unsqueeze(1).expand(8,8) + 0.001)
+    #vec = confusion_matrix.sum(dim = 1) # total number of gts per class
+    #confusion_matrix /= (vec.unsqueeze(1).expand(8,8) + 0.001)
     print(torch.round(confusion_matrix,decimals = 2))
     
     RESULT["confusion_matrix"] = confusion_matrix
