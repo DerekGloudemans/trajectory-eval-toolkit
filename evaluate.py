@@ -3,7 +3,8 @@
 from sup_metrics     import evaluate
 from unsup_statistics   import call
 
-from i24_database_api.db_writer import DBWriter
+#from i24_database_api.db_writer import DBWriter
+from i24_database_api import DBClient as DBWriter
 import numpy as np
 import os
 import time
@@ -97,20 +98,20 @@ if __name__ == "__main__":
     
     for db_name in ["trajectories","reconciled"]:
         db_param = {
-              "default_host": "10.2.218.56",
-              "default_port": 27017,
+              #"default_host": "10.2.218.56",
+              #"default_port": 27017,
               "host":"10.2.218.56",
               "port":27017,
               "username":"i24-data",
               "password":"mongodb@i24",
-              "default_username": "i24-data",
-              "readonly_user":"i24-data",
-              "default_password": "mongodb@i24",
-              "db_name": db_name,      
+              #"default_username": "i24-data",
+              #"readonly_user":"i24-data",
+              #"default_password": "mongodb@i24",
+              "database_name": db_name,      
               "server_id": 1,
               "session_config_id": 1,
-              "trajectory_database":"trajectories",
-              "timestamp_database":"transformed"
+              #"trajectory_database":"trajectories",
+              #"timestamp_database":"transformed"
               }
     
         gt_coll = "groundtruth_scene_1"
@@ -122,7 +123,7 @@ if __name__ == "__main__":
     
     
         # connect to database
-        dbw   = DBWriter(db_param,collection_name = " ")
+        dbw   = DBWriter(**db_param,collection_name = " ")
         existing_collections = dbw.db.list_collection_names() # list all collections
         existing_collections.sort()
         print("Existing Collections in database {}:".format(db_name)) 
