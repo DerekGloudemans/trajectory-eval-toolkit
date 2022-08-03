@@ -6,8 +6,7 @@ Created on Tue Jul 19 12:27:59 2022
 @author: derek
 """
 # 0. Imports
-from i24_database_api.db_reader import DBClient as DBReader
-from i24_database_api.db_writer import DBWriter
+from i24_database_api import DBClient
 import numpy as np
 import statistics
 import motmetrics
@@ -75,12 +74,12 @@ def evaluate(db_param,
     
     RESULT = {"postprocessed":True}
     
-    gtd   = DBReader(db_param,collection_name = gt_collection)
-    prd   = DBReader(db_param,collection_name = pred_collection)
+    gtd   = DBClient(**db_param, database_name = "trajectories", collection_name = gt_collection)
+    prd   = DBClient(**db_param, database_name = "trajectories", collection_name = pred_collection)
     
     
     if append_db:
-        dbw = DBWriter(db_param,collection_name = pred_collection)
+        dbw = DBClient(**db_param, database_name = "trajectories", collection_name = pred_collection)
         print("Appending assigned gt_ids to predicted data collection.")
     
     

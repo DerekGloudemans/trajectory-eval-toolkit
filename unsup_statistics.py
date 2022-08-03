@@ -26,8 +26,7 @@ TODO
 1. make traj_eval faster using MongoDB projection instead of python
 """
 
-from i24_database_api.db_reader import  DBClient as DBReader 
-from i24_database_api.db_writer import DBWriter
+from i24_database_api import DBClient
 
 import matplotlib.pyplot as plt
 import warnings
@@ -44,7 +43,7 @@ import time
     
 class UnsupervisedEvaluator():
     
-    def __init__(self, config, trajectory_database="trajectories", timestamp_database = "transformed", collection_name=None, num_threads=100):
+    def __init__(self, config, collection_name=None, num_threads=100):
         '''
         Parameters
         ----------
@@ -54,16 +53,28 @@ class UnsupervisedEvaluator():
             Collection name.
         '''
         self.collection_name = collection_name
-        self.dbr_v = DBReader(config, host = config["host"], username = config["username"], password = config["password"], port = config["port"], database_name = trajectory_database, collection_name=collection_name)
         
+        client = DBClient(**config)
+        db_time = client.client["transformed"]
+        db_raw = client.client["trajectories"]
+        db_rec = client.client["reconciled"]
+        
+        if collection_name in db_raw.list_collection_names():
+            read_database_name = "trajectories"
+        elif collection_name in db_rec.list_collection_names():
+            read_database_name = "reconciled"
+        else:
+            print(collection_name, "not in database trajectories or reconciled")
+            
         # start transform trajectory-indexed collection to time-indexed collection if not already exist
         # this will create a new collection in the "transformed" database with the same collection name as in "trajectory" database
-        if collection_name not in self.dbr_v.client[timestamp_database].list_collection_names():
+        if collection_name not in db_time.list_collection_names():
             print("Transform to time-indexed collection first")
-            self.dbr_v.transform(read_database_name=trajectory_database, 
+            client.transform(read_database_name=read_database_name, 
                       read_collection_name=collection_name)
             
-        self.dbr_t = DBReader(config, host = config["host"], username = config["username"], password = config["password"], port = config["port"], database_name = timestamp_database, collection_name=collection_name)
+        self.dbr_v = DBClient(**config, database_name = read_database_name, collection_name = collection_name)
+        self.dbr_t = DBClient(**config, database_name = "transformed", collection_name = collection_name)
         print("connected to pymongo client")
         self.res = defaultdict(dict) # min, max, avg, stdev
         self.num_threads = num_threads
@@ -425,8 +436,7 @@ class UnsupervisedEvaluator():
         print("saved.")
  
 def call(db_param,collection):    
-    ue = UnsupervisedEvaluator(db_param, trajectory_database=db_param["trajectory_database"],timestamp_database=db_param["timestamp_database"],
-                               collection_name=collection, num_threads=200)
+    ue = UnsupervisedEvaluator(db_param, collection_name=collection, num_threads=200)
     t1 = time.time()
     ue.traj_evaluate()
     ue.time_evaluate()
