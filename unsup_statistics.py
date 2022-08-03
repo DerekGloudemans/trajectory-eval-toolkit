@@ -73,8 +73,9 @@ class UnsupervisedEvaluator():
             client.transform(read_database_name=read_database_name, 
                       read_collection_name=collection_name)
             
-        self.dbr_v = DBClient(**config, database_name = read_database_name, collection_name = collection_name)
-        self.dbr_t = DBClient(**config, database_name = "transformed", collection_name = collection_name)
+        self.dbr_v = DBClient(**config, collection_name = collection_name)
+        config["database_name"] = "transformed"
+        self.dbr_t = DBClient(**config, collection_name = collection_name)
         print("connected to pymongo client")
         self.res = defaultdict(dict) # min, max, avg, stdev
         self.num_threads = num_threads

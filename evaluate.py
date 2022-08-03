@@ -13,7 +13,7 @@ import _pickle as pickle
 import warnings
 warnings.filterwarnings("ignore")
 
-# from eval_dashboard import main as dash
+from eval_dashboard import main as dash
 
 def db_cleanup(dbw):
     
@@ -97,31 +97,26 @@ if __name__ == "__main__":
     pc  = None
     
     for db_name in ["trajectories","reconciled"]:
-        # db_param = {
-        #       "default_host": "10.2.218.56",
-        #       "default_port": 27017,
-        #       "host":"10.2.218.56",
-        #       "port":27017,
-        #       "username":"i24-data",
-        #       "password":"mongodb@i24",
-        #       "default_username": "i24-data",
-        #       "readonly_user":"i24-data",
-        #       "default_password": "mongodb@i24",
-        #       "db_name": db_name,      
-        #       "server_id": 1,
-        #       "session_config_id": 1,
-        #       "trajectory_database":"trajectories",
-        #       "timestamp_database":"transformed"
-        #       }
         db_param = {
-            "host": "10.2.218.56",
-            	"port": 27017,
-            	"username": "i24-data",
-            	"password": "mongodb@i24",
-        }
+              #"default_host": "10.2.218.56",
+              #"default_port": 27017,
+              "host":"10.2.218.56",
+              "port":27017,
+              "username":"i24-data",
+              "password":"mongodb@i24",
+              #"default_username": "i24-data",
+              #"readonly_user":"i24-data",
+              #"default_password": "mongodb@i24",
+              "database_name": db_name,      
+              "server_id": 1,
+              "session_config_id": 1,
+              #"trajectory_database":"trajectories",
+              #"timestamp_database":"transformed"
+              }
+    
 
-        # gt_coll = "groundtruth_scene_1"
-        gt_coll = None
+        gt_coll = "groundtruth_scene_1"
+        #gt_coll = None
         IOUT = 0.3
         collection_cleanup = False
         #coll_name = "paradoxical_wallaby--RAW_GT1__boggles"     ; append_db = False
@@ -130,7 +125,7 @@ if __name__ == "__main__":
     
     
         # connect to database
-        dbw   = DBClient(**db_param, database_name = "trajectories")
+        dbw   = DBClient(**db_param)
         existing_collections = dbw.list_collection_names() # list all collections
         existing_collections.sort()
         print("Existing Collections in database {}:".format(dbw.database_name)) 
@@ -214,4 +209,4 @@ if __name__ == "__main__":
     ### clean up
     if collection_cleanup: db_cleanup(dbw)
 
-    # dash(pc = pc)
+    dash(pc = pc)
