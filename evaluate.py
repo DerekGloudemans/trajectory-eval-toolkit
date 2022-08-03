@@ -4,6 +4,7 @@ from sup_metrics     import evaluate
 from unsup_statistics   import call
 
 from i24_database_api import DBClient
+
 import numpy as np
 import os
 import time
@@ -118,7 +119,7 @@ if __name__ == "__main__":
             	"username": "i24-data",
             	"password": "mongodb@i24",
         }
-    
+
         # gt_coll = "groundtruth_scene_1"
         gt_coll = None
         IOUT = 0.3

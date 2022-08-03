@@ -1,2 +1,10 @@
 
 data/
+
+push_images/
+
+eval_results/
+
+.DS_Store
+
+*.pyc

@@ -8,6 +8,8 @@ import json
 import io
 import os
 import torch
+import requests
+from datetime import datetime
 
 from scipy.stats.kde import gaussian_kde
 from scipy.stats import norm
@@ -1117,7 +1119,20 @@ def gen_pane(results = [],
     cv2.waitKey(0)
     cv2.destroyAllWindows()
     
-    cv2.imwrite("temp_dash.png",dashboard)
+    
+    
+    now = datetime.now()
+    f_name = "./push_images/{}.png".format(now)
+    cv2.imwrite(f_name,dashboard)
+    
+    #snow = now.strftime("%Y-%m-%d_%H-%M-%S")
+    url = 'http://10.2.219.208:5991/upload'
+    files = {'upload_file': open(f_name,'rb')}
+    ret = requests.post(url, files=files)
+    print(ret)
+    if ret.status_code == 200:
+        print('Uploaded!')
+
     
 def dummy(a,b):
     pass
