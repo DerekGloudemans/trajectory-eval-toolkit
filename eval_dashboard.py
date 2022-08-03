@@ -7,6 +7,7 @@ import cv2
 import json
 import io
 import os
+import torch
 
 from scipy.stats.kde import gaussian_kde
 from scipy.stats import norm
@@ -32,7 +33,7 @@ There should also be a supplementary file with, for each metric, a description, 
 
 #%% Globals 
 global results_dir
-results_dir = "/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/"
+results_dir = "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/"
 
 global dpi
 dpi = 162
@@ -68,11 +69,25 @@ MD = {
     "num_fragmentations_per_gt":{"text":"Frag per GT","best":0,"bad":2},
     "pred_avg_matches":{"text":"GT IDs / Pred","best":1,"bad":2},
     "gt_avg_matches":{"text":"Pred IDs / GT","best":1,"bad":2},
+    "per_gt_recall":{"text":"Recall / GT","best":1,"bad":0},
+    "per_pred_precision":{"text":"Precision / GT","best":1,"bad":0}
+
     }
 
 global color_pallette 
-color_pallette = np.array([[117,158,186],   # for primary data
-                           [160,120,120],   # for baseline / old data
+# color_pallette = np.array([[117,158,186],   # for primary data
+#                            [160,120,120],   # for baseline / old data
+#                            [210,220,220],   # for other plots
+#                            [220,220,210],   # for other plots
+#                            [220,210,220],   # for other plots
+#                            [110,120,120],   # for other plots
+#                            [120,110,120],   # for other plots
+#                            [120,120,110],   # for other plots
+#                            [220,220,220],   # for cmap
+#                            [255,255,255]    # for pane default color
+#                            ])
+color_pallette = np.array([[131, 121, 163], # for primary data
+                           [163, 153, 116], #  for baseline / old data
                            [210,220,220],   # for other plots
                            [220,220,210],   # for other plots
                            [220,210,220],   # for other plots
@@ -84,25 +99,16 @@ color_pallette = np.array([[117,158,186],   # for primary data
                            ])
 
 global primary_colors
-primary_colors = np.array([[117,158,186],
-                           [117,158,176],
-                           [117,140,186],
-                           [110,158,186],
-                           [117,168,186],
-                           [117,158,176],
-                           [117,140,186],
-                           [110,158,186],
-                           [117,168,186]])
+primary_colors = (np.random.rand(8,3)-0.5) * 20 + color_pallette[0][None,:]
 
-secondary_colors = np.array([[160,120,120],
-                             [160,129,120],
-                             [180,120,120],
-                             [166,116,120],
-                             [148,120,110],
-                             [160,125,100],
-                             [170,122,120],
-                             [166,116,120],
-                             [148,120,120]])
+global secondary_colors
+secondary_colors = (np.random.rand(8,3)-0.5) * 20 + color_pallette[1][None,:]
+
+
+# primary_colors = primary_colors[:,::-1]
+# secondary_colors = secondary_colors[:,::-1]
+# color_pallette = color_pallette[:,::-1]
+
 
 global cmap
 #cmap = lambda x: np.array([(255*(1-x),140,255*x)]).astype(np.uint8).tolist()
@@ -203,7 +209,7 @@ def bar_MOT(results,figsize):
     
     for idx,lab in enumerate(name):
         # plot labels
-        x_plot = val[idx]/3 if val[idx] > 0.4 else 0.5
+        x_plot = val[idx]/3 if val[idx] > 0.3 else 0.5
         plot_lab = MD[lab]["text"]
         ax.text(x_plot,idx,plot_lab,fontsize = 1000/scale) 
         
@@ -237,7 +243,7 @@ def conf_matrix(result,figsize):
     confusion_matrix = result[0]["confusion_matrix"].data.numpy()[:n_c,:n_c] #* 1000 
     #plot confusion matrix
     sums = np.sum(confusion_matrix,axis= 0)
-    sumss = sums[:,np.newaxis]
+    sumss = sums[:,np.newaxis] + 0.00001
     sumss = np.repeat(sumss,confusion_matrix.shape[0],1)#.transpose()
     sumss = np.transpose(sumss)
     percentages = np.round(confusion_matrix/sumss * 100)
@@ -309,6 +315,8 @@ def death_pie(results,figsize):
     ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
     
     fig.text(0.5,0.95,"Object Cause of Death",fontsize = 2000/scale,ha = "center")
+    #plt.tight_layout()
+
 
     return f2a(fig)
 
@@ -688,15 +696,18 @@ def history(results,figsize):
     
     Repeat plot of baseline and primary collections in correct colors
     """
-    secondary_scale_power = 14
-    PSCALE = 3**secondary_scale_power
+    secondary_scale_power = 1            # adjust variation
+    PSCALE = 3000                       # adjust avg size
 
-    primary_metric = "Total"
-    secondary_metric = "mota"
+    primary_metric = "Aggregate Score" # must be in spider
+    secondary_metric = "Speed" # adjusts size, must be in spider
+    tertiary_metric = "mota" # adjusts transparency
+    x_metric = "gen_time"
     
     names = []
     primaries = []
     secondaries = []
+    tertiaries = []
     raw_names = []
     datetimes = []
     postprocessed = []
@@ -706,31 +717,36 @@ def history(results,figsize):
         
         with open(os.path.join(results_dir,coll),"rb") as f:
             hist_result = pickle.load(f)
+        hist_result = agg_score(hist_result)
         hist_gt_coll = hist_result["gt"]
         if hist_gt_coll == results[0]["gt"]: # only keep results on same GT
-            primaries.append(hist_result["spider"][primary_metric])
-            secondaries.append(hist_result[secondary_metric])            
+            primaries.append(hist_result[primary_metric])
+            secondaries.append(hist_result["spider"][secondary_metric])  
+            tertiaries.append(hist_result[tertiary_metric])  
             names.append(coll.split(".")[0])
             raw_names.append(coll.split(".")[0].split("--")[0])
-            datetimes.append(hist_result["gen_time"])
+            datetimes.append(hist_result[x_metric])
             postprocessed.append(hist_result["postprocessed"])
     
     fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
     ax = fig.add_subplot(111)
     
     rn = max(primaries) - min(primaries)
+    
+    best_idx = np.argmax(np.array(primaries))
     for idx in range(len(names)):
         x = datetimes[idx]
         y = primaries[idx]
         s = PSCALE * np.power(secondaries[idx],secondary_scale_power)
-        color =  color_pallette[idx%len(color_pallette)]/255
-        fc= color if postprocessed[idx] else "none"
-        plt.scatter(x,y,s,facecolor = fc,alpha = secondaries[idx])
+        color =  color_pallette[-2]/255
+        fc= color #if postprocessed[idx] else "none"
+        plt.scatter(x,y,s,facecolor = fc,alpha = tertiaries[idx])
         if not postprocessed[idx]:
             plt.scatter(x,y,s,linewidth = 2,edgecolor =  (.3,.3,.3),facecolor = fc)
 
-        text_name = names[idx].split("_")[-1] if postprocessed[idx] else raw_names[idx]
-        plt.text(x,y+0.07*(rn),text_name,va = "bottom", ha = "center",fontsize = 1000/scale)
+        if idx == best_idx or names[idx] == results[0]["name"] or names[idx] == results[1]["name"]:
+            text_name = (names[idx].split("_")[-1] if postprocessed[idx] else raw_names[idx]) + " ({:.2f})".format(primaries[idx])
+            plt.text(x,y+0*(rn),text_name,va = "center", ha = "center",fontsize = 600/scale,rotation = 0)
     
     # plot ties
     for i in range(len(names)):
@@ -739,74 +755,235 @@ def history(results,figsize):
                 x = [datetimes[i],datetimes[j]]
                 y = [primaries[i],primaries[j]]
                 plt.plot(x,y,linestyle = ":", color = (.3,.3,.3),linewidth = 1)
-   
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-    ax.xaxis.set_major_locator(mdates.DayLocator(interval=7))
+    
+    if x_metric == "gen_time":
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        ax.xaxis.set_major_locator(mdates.DayLocator(interval=3))
     
     ax.spines["top"].set_visible(False)
-    ax.spines["left"].set_visible(False)
+    #ax.spines["left"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
-    ax.set_ylabel("Aggregate Score",fontsize = 1500/scale)
-    ax.set_xlabel("Date",fontsize = 1500/scale)
-    ax.set_yticklabels([])
-    ax.set_yticks([])
-    ax.tick_params(axis='x', labelsize=1000/scale, length = 10,labelrotation = 45 )
-    ax.set_ylim([min(primaries)-0.25,max(primaries) + 0.25])
+    #ax.set_ylabel("Aggregate Score",fontsize = 1500/scale)
+    ax.set_xlabel(x_metric,fontsize = 1500/scale)
+    ax.set_ylabel(primary_metric,fontsize = 1500/scale)
+
+    #ax.set_yticklabels([])
+    #ax.set_yticks([])
+    ax.tick_params(axis='both', labelsize=1000/scale, length = 10,labelrotation = 45 )
+    ax.set_ylim([min(primaries)-0.125,max(primaries)+0.125])
     
     
     # replot primary
-    prim = results[0]["spider"][primary_metric]
-    second = results[0][secondary_metric]
-    date = results[0]["gen_time"]
+    prim = results[0][primary_metric]
+    second = results[0]["spider"][secondary_metric]
+    date = results[0][x_metric]
     post = results[0]["postprocessed"]
     s = PSCALE * np.power(second,secondary_scale_power)
-    fc = color_pallette[0]/255 if post else "none"
+    fc = color_pallette[0]/255 #if post else "none"
     lw =  4
     edge_color = color_pallette[0] / 255
     plt.scatter(date,prim,s,linewidth = lw,edgecolor =  edge_color,facecolor = fc)
     
-    
     # replot  secondary
     if len(results) > 1:
-        prim = results[1]["spider"][primary_metric]
-        second = results[1][secondary_metric]
-        date = results[1]["gen_time"]
+        prim = results[1][primary_metric]
+        second = results[1]["spider"][secondary_metric]
+        date = results[1][x_metric]
         post = results[1]["postprocessed"]
         s = PSCALE * np.power(second,secondary_scale_power)
-        fc = color_pallette[1]/255 if post else "none"
+        fc = color_pallette[1]/255 #if post else "none"
         lw =  4
         edge_color = color_pallette[1] / 255
         plt.scatter(date,prim,s,linewidth = lw,edgecolor =  edge_color,facecolor = fc)
     
     fig.subplots_adjust(bottom=0.25)
     
+    # write out best results so far
     best_idx = np.argmax(np.array(primaries))
     best_coll= names[best_idx]
     best_text= "Current Best Result: {} ({:.1f})".format(best_coll,primaries[best_idx])
-    
     fig.text(0.02,0.98,best_text, va = "top", fontsize = 1000/scale)
-
+    
+    primaries = [primaries[idx] * int(not postprocessed[idx]) for idx in range(len(primaries))]
+    best_idx = np.argmax(np.array(primaries))
+    best_coll= names[best_idx]
+    best_text= "Current Best Raw Result: {} ({:.1f})".format(best_coll,primaries[best_idx])
+    fig.text(0.02,0.94,best_text, va = "top", fontsize = 1000/scale)
     
     return f2a(fig)
 
 
+def iou_scatter(results,figsize):
+
+    
+    return
+    
+    fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
+    ax = fig.add_subplot(111)
+    
+    ridx =0
+    x_val = results[ridx]["match_overlap"]["conf"]
+    y_val = results[ridx]["match_overlap"]["iou"]
+    # plot_windows = np.arange(0,1,0.025)
+    # for i in range(len(plot_windows)-1):
+    #     imin = plot_windows[i]
+    #     imax = plot_windows[i+1]
+    #     select_idx = np.argwhere(np.bitwise_and(x_val > imin, x_val < imax ).astype(int))
+        
+    #     x_select = np.array(x_val)[select_idx]
+    #     y_select = np.array(y_val)[select_idx]
+    #     ax.scatter(x_select,y_select,alpha = 1/len(select_idx)**0.5,color = color_pallette[ridx]/255)
+    
+    ax.scatter(x_val,y_val,alpha = 0.01,color =color_pallette[ridx]/255)
+    
+    
+    fig.text(0.02,0.94,"temp title", va = "top", fontsize = 1000/scale)
+    
+    return f2a(fig)
+
+def sup_hist(results,figsize):
+    
+    """
+    These quantities should be in the range [0,1]
+    """
+    
+    to_plot = ["per_gt_recall","per_pred_precision"]
+    units = ["",""]
+    xrange_clip = [[0,1],[0,1],[-200,200]]
+    
+    fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
+    # ax = fig.add_subplot(111)
+    # ax.spines.top.set_visible(False)
+    # ax.spines.left.set_visible(True)
+    # ax.spines.right.set_visible(False)
+    
+    # get data
+    data = [results[0][key] for key in to_plot]
+    xx = np.arange(0,1,0.01)
+    data_pdf = []
+    for i in range(len(data)):
+        pdf = gaussian_kde(data[i])
+        data_pdf.append([xx,pdf(xx)])
+    
+    if len(results) > 1:
+        data2 = [results[1][key] for key in to_plot]
+        #data2 = np.stack(data2)
+        data2_pdf = []
+        for i in range(len(data2)):
+            pdf = gaussian_kde(data2[i])
+            data2_pdf.append([xx,pdf(xx)])
+    
+    gs = (grid_spec.GridSpec(len(data),1))
+    
+    #creating empty list
+    ax_objs = []
+    for didx in range(len(data_pdf)):
+        xx,dataD = data_pdf[didx]
+        # creating new axes object and appending to ax_objs
+        ax_objs.append(fig.add_subplot(gs[didx:didx+1, 0:]))
+        
+        max_val = np.max(dataD)
+        xr = [min(xx),max(xx)]
+
+        # plotting the distribution
+        # filling the space beneath the distribution
+        if len(results) > 1:
+            xx2,dataD2 = data2_pdf[didx]
+            ax_objs[-1].fill_between(xx2,dataD2,alpha = 0.6,color = color_pallette[1]/255)
+            ax_objs[-1].plot(xx2,dataD2,color = color_pallette[1]/255)
+            
+            max_val = max(np.max(dataD),np.max(dataD2))
+            xr = [min(min(xx),min(xx2)),max(max(xx),max(xx2))]
+            
+        ax_objs[-1].fill_between(xx,dataD,alpha = 0.5,color = color_pallette[0]/255)
+        ax_objs[-1].plot(xx,dataD,color = "black",linewidth = 2)
 
 
+    
+        # setting uniform x and y lims
+        xr[0] = max(xr[0],xrange_clip[didx][0])
+        xr[1] = min(xr[1],xrange_clip[didx][1])
+
+        ax_objs[-1].set_xlim(xr[0],xr[1])
+        ax_objs[-1].set_ylim(0,max_val)
+    
+        # make background transparent
+        rect = ax_objs[-1].patch
+        rect.set_alpha(0)
+        
+        # remove borders, axis ticks, and labels
+        ax_objs[-1].set_yticklabels([])
+        ax_objs[-1].set_yticks([])
+        ax_objs[-1].set_ylabel('')
+        
+        #if didx == data.shape[0]-1:
+        ax_objs[-1].tick_params(axis='x', labelsize=1000/scale,length = 500/scale )
+        ax_objs[-1].set_xlabel("{}".format(units[didx]), fontsize = 1500/scale)
+        # else:
+        #     ax_objs[-1].set_xticklabels([])
+        #     ax_objs[-1].tick_params(axis='x', length = 200/scale )
+
+        
+        spines = ["top","right","left"]#,"bottom"]
+        for s in spines:
+            ax_objs[-1].spines[s].set_visible(False)
+        yv = max_val
+        ax_objs[-1].text(xr[0],yv,MD[to_plot[didx]]["text"],fontweight="bold",fontsize = 1500/scale,va="bottom")
+        #ax_objs[-1].axvline(x = 0, ymax = 0.8, linestyle = ":",color = (0.2,0.2,0.2))
+        
+        
+        # # get mean,MAE, stddev, max
+        mean = np.mean(data[didx])
+        # MA  = np.mean(np.abs(data[didx]))
+        # stddev = np.std(data[didx])
+        # maxx = np.max(np.abs(data[didx]))
+        xv = xr[0] #+  0.2*(xr[1] - xr[0])
+        ax_objs[-1].text(xv,yv,               "Mean:     {:.2f}{}".format(mean,units[didx]),fontsize = 1000/scale,va="top")
+        # ax_objs[-1].text(xv,max_val/2-(0.05*max_val),"Mean Abs: {:.1f}{}".format(MA,units[didx]),fontsize = 1000/scale,va="top")
+        # ax_objs[-1].text(xv,max_val/2-(0.1*max_val), "Stdev:    {:.1f}{}".format(stddev,units[didx]),fontsize = 1000/scale,va="top")
+        # ax_objs[-1].text(xv,max_val/2-(0.15*max_val),"Max:      {:.1f}{}".format(maxx,units[didx]),fontsize = 1000/scale,va="top")
+        
+        if len(results) > 1:
+             mean = np.mean(data2[didx])
+        #     MA  = np.mean(np.abs(data2[didx]))
+        #     stddev = np.std(data2[didx])
+        #     maxx = np.max(np.abs(data2[didx]))
+            
+             xv = xr[0] + 0.16*(xr[1] - xr[0])
+        #     # may need a black border
+            
+             ax_objs[-1].text(xv,yv,     " ({:.2f}{})".format(mean,units[didx]),fontsize = 1000/scale,va="top",ha="left", color=color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
+        #     ax_objs[-1].text(xv,max_val/2-(0.05*max_val)," ({:.1f}{})".format(MA,units[didx]),fontsize = 1000/scale,va="top",ha="left", color= color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
+        #     ax_objs[-1].text(xv,max_val/2-(0.1*max_val), " ({:.1f}{})".format(stddev,units[didx]),fontsize = 1000/scale,va="top",ha="left", color= color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
+        #     ax_objs[-1].text(xv,max_val/2-(0.15*max_val)," ({:.1f}{})".format(maxx,units[didx]),fontsize = 1000/scale,va="top",ha="left", color= color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
+
+    plt.tight_layout()
+    #gs.update(hspace= -0.2)
+    
+    
+    #fig.text(0.5,0.95,"Trajectory Attribute Histograms",fontsize = 2000/scale,ha = "center")
+    return f2a(fig)
+    
 def gen_spiderplot(results,figsize):
+    
+    results[0] = agg_score(results[0])
+    
+    
     fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
     ax = fig.add_subplot(111,projection="polar")
     ax.patch.set_facecolor((0.95,0.95,0.95))
     # Bars are sorted by the cumulative track length
     df_keys = list(results[0]["spider"].keys())
-    total1 = results[0]["spider"]["Total"] 
-    df_keys.remove("Total")
+    total1 = results[0]["Aggregate Score"] 
+    #df_keys.remove("Total")
     
     df_sorted = [results[0]["spider"][key] + 0.01 for key in df_keys]
     
     if len(results) > 1:
+        results[1] = agg_score(results[1])
         df2_sorted = [results[1]["spider"][key] + 0.01 for key in df_keys]
-        total2 = results[1]["spider"]["Total"] 
+        total2 = results[1]["Aggregate Score"]
 
     # Values for the x axis
     ANGLES = np.linspace(0.05, 2 * np.pi - 0.05, len(df_sorted), endpoint=False)
@@ -873,13 +1050,16 @@ def gen_spiderplot(results,figsize):
     fig.subplots_adjust(top=0.8)
     ly = 0.83
     fig.text(0.03,ly,"{:.1f}".format(total1),fontsize = 7000/scale, va = "bottom", ha = "left",color = color_pallette[0]/255)
-    fig.text(0.03,ly," aggregate score",fontsize = 2000/scale, va = "top", ha = "left")
+    fig.text(0.03,ly," Score",fontsize = 2000/scale, va = "top", ha = "left")
 
     if len(results) > 1:
         fig.text(0.97,ly,"{:.1f}".format(total2),fontsize = 7000/scale, va = "bottom", ha = "right",color = color_pallette[1]/255)
-        fig.text(0.97,ly," baseline score",fontsize = 2000/scale, va = "top", ha = "right")
-
-    fig.text(0.01,0.01,"Note: Each component is weighted to calculate aggregate score", va = "bottom", fontsize = 1000/scale)
+        fig.text(0.97,ly," Baseline score",fontsize = 2000/scale, va = "top", ha = "right")
+        
+    weights = [" {}:{}".format(key,results[0]["score_weighting"][key]) for key in results[0]["score_weighting"].keys()]
+    sum_weights = sum([results[0]["score_weighting"][key] for key in results[0]["score_weighting"].keys()])
+    
+    fig.text(0.01,0.01,"Score weights (Total score = {}):   {}".format(sum_weights,weights), va = "bottom", fontsize = 1000/scale, wrap = True)
     return f2a(fig)    
 
 def gen_pane(results = [],
@@ -944,6 +1124,45 @@ def dummy(a,b):
 
 
 
+def lrk(results):
+    # list result keys
+    keylist = list(results[0].keys())
+    keylist.sort()
+    [print(key) for key in keylist ]
+    
+    
+def agg_score(result):
+    """
+    Appends spider with agg score quantities to result
+    """
+    
+    spider = {}
+    spider["MOTA"]              = result["mota"]
+    spider["Speed"]             = result["bps"] / 30
+    spider["X Error"]           = max(0, 1 - result["MAE_x"] / 5.0  )
+    spider["% to Extents"]      = (  result["cause_of_death"]["Exit FOV"] + result["cause_of_death"]["Active at End"] )    /result["n_pred"]
+    spider["Trajectory Length"] = result["x_traveled_avg"] /  (sum(result["gt_x_traveled"])/len(result["gt_x_traveled"]))
+    spider["Avg Acceleration"]  = max(0, 1 - np.mean(np.abs(result["avg_ax_raw"])) / (5))
+    spider["Classification"]    = torch.sum(torch.diag(result["confusion_matrix"])) /torch.sum(result["confusion_matrix"])
+    spider["Avg GT cover"]      = sum(result["per_gt_recall"])/len(result["per_gt_recall"])
+    spider["Avg Pred cover"]    = sum(result["per_pred_precision"])/len(result["per_pred_precision"])
+    
+    score_weighting = {
+        "MOTA":2,
+        "Speed":2,
+        "% to Extents":0.5,
+        "X Error":1,
+        "Trajectory Length":1,
+        "Avg Acceleration":1,
+        "Classification":0.5,
+        "Avg GT cover":2,
+        "Avg Pred cover":1
+        }
+    
+    result["Aggregate Score"] = sum([score_weighting[key] * spider[key] for key in spider.keys()])
+    result["spider"] = spider
+    result["score_weighting"] = score_weighting
+    return result
 
 #%% TO BE IMPLEMENTED
     
@@ -954,9 +1173,12 @@ if __name__ == "__main__":
     plt.savefig("test.png")
     # load each result
     results = [
-        "/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/morose_panda--RAW_GT1_castigates.cpkl",
-        "/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/morose_panda--RAW_GT1.cpkl",
+        #"/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/morose_panda--RAW_GT1_castigates.cpkl",
+        "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/paradoxical_wallaby--RAW_GT1__boggles.cpkl",
+        "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/paradoxical_wallaby--RAW_GT1.cpkl",
         ]
+    #results.reverse()
+
     for i in range(len(results)):
         with open(results[i],"rb") as f:
             results[i] = pickle.load(f)
@@ -964,23 +1186,24 @@ if __name__ == "__main__":
     # pane = origin x, origin y, width , height
     panes = np.array([[0,0,4,1], # Title   # 
                       [0,1,4,3], # Spider
-                      [0,4,4,2], # History
-                      [0,6,4,3], # Death   #
+                      [0,4,4,3], # History
+                      [0,7,4,2], # Death   #
 
                       [4,0.5,4,0.5], # Unsupervised Summary     #
-                      [4,1,4,2], # Unsupervised General (List)
-                      [4,3,4,6],  # Unsupervised Histograms     #
+                      [4,1,4,2],     # Unsupervised General (List)
+                      [4,3,4,4],     # Unsupervised Histograms     #
+                      [4,7,4,2],     # Conf Var Dist
                       
                       [8,0.5,8,0.5], # Supervised Summary      #
                       [8,1,4,4], # MOT metrics (1-norm)        #
                       [8,5,4,4], # Confusion Matrix            #
  
-                      [12,1,4,5], # State error                #  
-                      [12,6,4,2], # MOT chart
-                      [12,8,4,1], # Additional Hover Info
+                      [12,1,4,4], # State error                #  
+                      [12,5,4,2], # MOT chart
+                      [12,7,4,2], # Additional Hover Info
                       ])
     
-    pane_functions = [gen_title,gen_spiderplot,history,death_pie,unsup_title,chart_unsup,unsup_hist,sup_title,bar_MOT,conf_matrix,state_error,chart_MOT,dummy]
+    pane_functions = [gen_title,gen_spiderplot,history,death_pie,unsup_title,chart_unsup,unsup_hist,iou_scatter,sup_title,bar_MOT,conf_matrix,state_error,chart_MOT,sup_hist]
     
     
     gen_pane(results = results,

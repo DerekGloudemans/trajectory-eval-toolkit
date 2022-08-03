@@ -67,7 +67,7 @@ def state_iou(a,b,threshold = 0.3):
 
 def evaluate(db_param,
              gt_collection   = "groundtruth_scene_1",
-             pred_collection = "morose_panda--RAW_GT1_reconciled",
+             pred_collection = "paradoxical_wallaby--RAW_GT1",
              sample_freq     = 30,
              break_sample = 2700,
              append_db = False,
@@ -87,7 +87,8 @@ def evaluate(db_param,
     gts = list(gtd.read_query(None))
     preds = list(prd.read_query(None))
     
-    
+    n_gt_resample_points = {}
+    n_pred_resample_points = {}
     # 2. Parse collections into expected format for MOT EVAL
     
     # for each object, get the minimum and maximum timestamp
@@ -160,6 +161,12 @@ def evaluate(db_param,
                         "y":y_int
                         }
                 st_gt.append(obj)
+                
+                try:
+                    n_gt_resample_points[CONV_GT[gts[gidx]["_id"]]] += 1
+                except:
+                    n_gt_resample_points[CONV_GT[gts[gidx]["_id"]]] = 1
+                
         gt_resampled.append(st_gt)
         
         for pidx in range(len(preds)):
@@ -185,11 +192,26 @@ def evaluate(db_param,
                 x_int = preds[pidx]["x_position"][sample_idx] + c2 * (preds[pidx]["x_position"][sample_idx+1] - preds[pidx]["x_position"][sample_idx])
                 y_int = preds[pidx]["y_position"][sample_idx] + c2 * (preds[pidx]["y_position"][sample_idx+1] - preds[pidx]["y_position"][sample_idx])
                 
+                try:
+                    conf_int = preds[pidx]["detection_confidence"][sample_idx] + c2 * (preds[pidx]["detection_confidence"][sample_idx+1] - preds[pidx]["detection_confidence"][sample_idx])
+                    xvar_int = preds[pidx]["variance"][sample_idx][0] + c2 * (preds[pidx]["variance"][sample_idx+1][0] - preds[pidx]["variance"][sample_idx][0])
+                except:
+                    xvar_int = -1
+                    conf_int = -1
+                
                 obj = {"id":CONV_PRED[preds[pidx]["_id"]],
                         "x":x_int,
-                        "y":y_int
+                        "y":y_int,
+                        "xvar":xvar_int,
+                        "conf":conf_int,
                         }
                 st_pred.append(obj)
+                
+                try:
+                    n_pred_resample_points[CONV_PRED[preds[pidx]["_id"]]] += 1
+                except:
+                    n_pred_resample_points[CONV_PRED[preds[pidx]["_id"]]] = 1
+                
         pred_resampled.append(st_pred)
                 
     print("Resampling complete")
@@ -283,6 +305,11 @@ def evaluate(db_param,
     #events = acc.events.values.tolist()
     confusion_matrix = torch.zeros([8,8])
     state_errors = []
+    
+    match_iou = []
+    match_conf = []
+    match_xvar = []
+    
     # we care only about
     relevant = ["MATCH","SWITCH","TRANFER","ASCEND","MIGRATE"]
     for event in acc.events.iterrows():
@@ -308,7 +335,17 @@ def evaluate(db_param,
             for pos in pred_resampled[fidx]:
                 if pos["id"] == pred_id:
                     pred_pos = np.array([pos["x"],pos["y"],pred_dict[pred_id]["length"],pred_dict[pred_id]["width"],pred_dict[pred_id]["height"]])
+                    
+                    # note that these are interpolated conf and variance values
+                    if event[0] == "MATCH":
+                        iou = event[3]
+                        pred_conf = pos["conf"]
+                        pred_xvar = pos["xvar"]
+                        match_conf.append(pred_conf)
+                        match_xvar.append(pred_xvar)
+                        match_iou.append(iou)
                     break
+                
             for pos in gt_resampled[fidx]:
                 if pos["id"] == gt_id:
                     gt_pos = np.array([pos["x"],pos["y"],gt_dict[gt_id]["length"],gt_dict[gt_id]["width"],gt_dict[gt_id]["height"]])
@@ -320,7 +357,8 @@ def evaluate(db_param,
             pred_cls = pred_dict[pred_id]["coarse_vehicle_class"]
             
             confusion_matrix[gt_cls,pred_cls] += 1
-    
+        
+            
     ####################################################################################################################################################       SUPERVISED
 
     ### State Accuracy Metrics
@@ -330,6 +368,11 @@ def evaluate(db_param,
     #print(np.sqrt(np.mean(np.power(state_errors,2),axis = 0)))
     
     RESULT["state_error"] = state_errors
+    RESULT["match_overlap"] = {"conf":match_conf,
+                                "iou":match_iou,
+                                "var":match_xvar
+                                }
+    
     
     ### Unsupervised metrics  --- statistics
     
@@ -418,6 +461,29 @@ def evaluate(db_param,
     pred_no_matches /= len(pred_dict)
     pred_avg_assigned_matches = sum(pred_assigned_id_count)/len(pred_assigned_id_count)
     
+    # what percentage of GT is covered, per GT
+    per_gt_recall = []
+    for key in gt_dict.keys():
+        traj = gt_dict[key]
+        try:
+            this_traj_recall = len(traj["assigned_frag_ids"]) / n_gt_resample_points[key]
+        except:
+            this_traj_recall = 0
+        per_gt_recall.append(this_traj_recall)
+    RESULT["per_gt_recall"] = per_gt_recall
+    
+    # what percentage of preds cover, per pred
+    per_pred_precision = []
+    for key in pred_dict.keys():
+        traj = pred_dict[key]
+        try:
+            this_traj_prec = len(traj["assigned_gt_ids"]) / n_pred_resample_points[key]
+        except:
+            this_traj_prec = 0
+        per_pred_precision.append(this_traj_prec)
+    RESULT["per_pred_precision"] = per_pred_precision
+
+    
     RESULT["gt_match"]      =    1 - gt_no_matches
     RESULT["pred_match"]    = 1 - pred_no_matches
     RESULT["pred_avg_matches"] = pred_avg_assigned_matches
@@ -435,16 +501,22 @@ def evaluate(db_param,
     
     # Flag counter
     COD = {}
+    COD_length = {}
+    COD["Active at End"] = 0
+    COD_length["Active at End"] = []
+
     for traj in pred_dict.values():
         death =  traj["flags"][0]
         if death not in COD.keys():
             COD[death] = 1
+            COD_length[death] = [len(traj["x_position"])]
         else:
             COD[death] += 1
+            COD_length[death].append(len(traj["x_position"]))
     RESULT["cause_of_death"] = COD
     
+    RESULT["observations_by_cause_of_death"] = COD_length
     
-    # get per-instance dimension standard deviation
     
     
     
@@ -461,6 +533,54 @@ def evaluate(db_param,
     RESULT["partially_tracked%"] = RESULT["partially_tracked"]/n_gt
 
     RESULT["gen_time"] = preds[0]["_id"].generation_time   
+    
+    RESULT["gt_x_traveled"] = [np.abs(max(traj["x_position"]) - min(traj["x_position"])) for traj in gt_dict.values()]
+        
+    # estimate trail-offs
+    trail_off_distances = []
+    toff_count = 0
+    
+    idx3 = -20
+    idx2 = -10
+    idx0 = -1
+    trail_off_threshold = 200 # feet
+    
+    import matplotlib.pyplot as plt
+    
+    # for traj in pred_dict.values():
+        
+    #     if len(traj["x_position"]) > np.abs(idx3) + 1:
+        
+        
+        
+    #         x3 =  traj["x_position"][idx3]
+    #         y3 =  traj["y_position"][idx3]
+    #         t3 =   traj["timestamp"][idx3]
+            
+    #         x2 =  traj["x_position"][idx2]
+    #         y2 =  traj["y_position"][idx2]
+    #         t2 =   traj["timestamp"][idx2]
+            
+    #         x0 =  traj["x_position"][idx0]
+    #         y0 =  traj["y_position"][idx0]
+    #         t0 =   traj["timestamp"][idx0]
+            
+    #         dt32     =  t2 - t3
+    #         dt30     =  t0 - t3
+    #         x_interp =  x3 + ((x2 - x3) / dt32 * dt30)
+    #         y_interp =  y3 + ((y2 - y3) / dt32 * dt30)
+            
+    #         trail_off_dist = np.sqrt((x_interp - x0)**2 + (y_interp - y0)**2)
+            
+    #         print(trail_off_dist)
+            
+    #         trail_off_distances.append(trail_off_dist)
+        
+    #         color = (0,0.5,0.1)
+    #         if trail_off_dist > trail_off_threshold:
+    #             toff_count += 1
+    #             color = (1,0,0)
+    #         plt.plot(traj["timestamp"],traj["x_position"],color = color)
     
     return  RESULT
 
@@ -481,7 +601,7 @@ if __name__ == "__main__":
           "trajectory_database":"trajectories",
           "timestamp_database":"transformed"
           }
-    evaluate(db_param)
+    r = evaluate(db_param)
 
 
 
