@@ -6,7 +6,7 @@ Created on Tue Jul 19 12:27:59 2022
 @author: derek
 """
 # 0. Imports
-from i24_database_api.db_reader import DBReader
+from i24_database_api.db_reader import DBClient as DBReader
 from i24_database_api.db_writer import DBWriter
 import numpy as np
 import statistics

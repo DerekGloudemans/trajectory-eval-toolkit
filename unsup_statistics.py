@@ -26,9 +26,8 @@ TODO
 1. make traj_eval faster using MongoDB projection instead of python
 """
 
-from i24_database_api.db_reader import DBReader
+from i24_database_api.db_reader import  DBClient as DBReader 
 from i24_database_api.db_writer import DBWriter
-from i24_database_api import transform
 
 import matplotlib.pyplot as plt
 import warnings
@@ -61,11 +60,7 @@ class UnsupervisedEvaluator():
         # this will create a new collection in the "transformed" database with the same collection name as in "trajectory" database
         if collection_name not in self.dbr_v.client[timestamp_database].list_collection_names():
             print("Transform to time-indexed collection first")
-            transform(host=config["host"], 
-                      port=config["port"], 
-                      username="i24-data", 
-                      password=config["password"], 
-                      read_database_name=trajectory_database, 
+            self.dbr_v.transform(read_database_name=trajectory_database, 
                       read_collection_name=collection_name)
             
         self.dbr_t = DBReader(config, host = config["host"], username = config["username"], password = config["password"], port = config["port"], database_name = timestamp_database, collection_name=collection_name)

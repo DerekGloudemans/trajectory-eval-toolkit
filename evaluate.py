@@ -12,6 +12,8 @@ import _pickle as pickle
 import warnings
 warnings.filterwarnings("ignore")
 
+from eval_dashboard import main as dash
+
 def db_cleanup(dbw):
     
     while True:
@@ -88,112 +90,120 @@ def get_pickle(name):
         result = pickle.load(f)
         return result
 
-db_param = {
-      "default_host": "10.2.218.56",
-      "default_port": 27017,
-      "host":"10.2.218.56",
-      "port":27017,
-      "username":"i24-data",
-      "password":"mongodb@i24",
-      "default_username": "i24-data",
-      "readonly_user":"i24-data",
-      "default_password": "mongodb@i24",
-      "db_name": "trajectories",      
-      "server_id": 1,
-      "session_config_id": 1,
-      "trajectory_database":"trajectories",
-      "timestamp_database":"transformed"
-      }
 
+    
 if __name__ == "__main__":
-    gt_coll = "groundtruth_scene_1"
-    IOUT = 0.3
-    collection_cleanup = False
-    #coll_name = "paradoxical_wallaby--RAW_GT1__boggles"     ; append_db = False
-    coll_name = None ; append_db  = True
-    TAG = "GT1"
-
-
-    # connect to database
-    dbw   = DBWriter(db_param,collection_name = db_param["db_name"])
-    existing_collections = dbw.db.list_collection_names() # list all collections
-    existing_collections.sort()
-    print("Existing Collections: \n") 
-    [print(item) for item in existing_collections]
-    print("\n")
+    pc  = None
     
-    if coll_name is None:
-        to_evaluate = existing_collections
-    else:
-        to_evaluate = [coll_name]
+    for db_name in ["trajectories","reconciled"]:
+        db_param = {
+              "default_host": "10.2.218.56",
+              "default_port": 27017,
+              "host":"10.2.218.56",
+              "port":27017,
+              "username":"i24-data",
+              "password":"mongodb@i24",
+              "default_username": "i24-data",
+              "readonly_user":"i24-data",
+              "default_password": "mongodb@i24",
+              "db_name": db_name,      
+              "server_id": 1,
+              "session_config_id": 1,
+              "trajectory_database":"trajectories",
+              "timestamp_database":"transformed"
+              }
+    
+        gt_coll = "groundtruth_scene_1"
+        IOUT = 0.3
+        collection_cleanup = False
+        #coll_name = "paradoxical_wallaby--RAW_GT1__boggles"     ; append_db = False
+        coll_name = None ; append_db  = True
+        TAG = "GT1"
+    
+    
+        # connect to database
+        dbw   = DBWriter(db_param,collection_name = " ")
+        existing_collections = dbw.db.list_collection_names() # list all collections
+        existing_collections.sort()
+        print("Existing Collections in database {}:".format(db_name)) 
+        [print(item) for item in existing_collections]
+        print("\n")
         
-    for coll_name in to_evaluate:
-        if TAG in coll_name:
+        if coll_name is None:
+            to_evaluate = existing_collections
+        else:
+            to_evaluate = [coll_name]
             
-            # check whether has already been evaluated
-            save_name = "./data/eval_results/{}.cpkl".format(coll_name)
-            if os.path.exists(save_name):
-                continue
-            
-            # generate comment
-            #comment = input("Description of run settings / test for storage with evaluation results: ")    
-            result = {}
-            #result["description"] = comment
-            result["bps"]  = 1
-    
-            # try to overwrite this stuff with an existing runfile
-            base_name = "./data/run_results/"+ coll_name.split("__")[0] + "_run_results.cpkl"
-            try:
-                result = get_pickle(base_name)
-                print("Reloaded run_result for {}".format(coll_name))
-            except:
-                print("Failed to reload run result for {}".format(coll_name))
-
-            result["name"] = coll_name
-            result["iou_threshold"] = IOUT
-
-            try:
+        for coll_name in to_evaluate:
+            if TAG in coll_name:
                 
-
-                start = time.time()
-                ### supervised evaluation
-                if gt_coll is not None:
-                    metrics = evaluate(db_param,gt_collection = gt_coll,pred_collection = coll_name, sample_freq = 30, break_sample = 2700,append_db = append_db,iou_threshold = IOUT)
-                    result["iou_threshold"] = IOUT
-                    result["gt"] = gt_coll        
-                    for key in metrics.keys():
-                        result[key] = metrics[key]
-            
-                ### unsupervised statistics
-                statistics = call(db_param,coll_name)
-                elapsed = time.time() - start
-                result["eval_time"] = elapsed
+                # check whether has already been evaluated
+                save_name = "./data/eval_results/{}.cpkl".format(coll_name)
+                if os.path.exists(save_name):
+                    continue
+                
+                # generate comment
+                #comment = input("Description of run settings / test for storage with evaluation results: ")    
+                result = {}
+                #result["description"] = comment
+                result["bps"]  = 1
         
-                # unroll statistics and metrics so that result is flat
-                for key in statistics.keys():
-                    stat = statistics[key]
+                # try to overwrite this stuff with an existing runfile
+                base_name = "./data/run_results/"+ coll_name.split("__")[0] + "_run_results.cpkl"
+                try:
+                    result = get_pickle(base_name)
+                    print("Reloaded run_result for {}".format(coll_name))
+                except:
+                    print("Failed to reload run result for {}".format(coll_name))
+    
+                result["name"] = coll_name
+                result["iou_threshold"] = IOUT
+    
+                try:
                     
-                    if type(stat) == dict:
-                        for subkey in stat.keys():
-                            kn = "{}_{}".format(key,subkey)
-                            result[kn] = stat[subkey]
-                    else:
-                        result[key] = stat
-        
-                # create a few new ones
-                result["overlaps_per_object"] = len(result["overlaps"]) / result["traj_count"]
-                result["percent_backwards"] = len(result["backward_cars"]) / result["traj_count"]
-                result["MAE_x"] = np.mean(np.abs(result["state_error"][:,0]))
-        
-        
-         
-                ### Save results dict in /data/eval_results
-                with open(save_name, 'wb') as f:
-                    pickle.dump(result, f)
+    
+                    start = time.time()
+                    ### supervised evaluation
+                    if gt_coll is not None:
+                        metrics = evaluate(db_param,gt_collection = gt_coll,pred_collection = coll_name, sample_freq = 30, break_sample = 2700,append_db = append_db,iou_threshold = IOUT)
+                        result["iou_threshold"] = IOUT
+                        result["gt"] = gt_coll        
+                        for key in metrics.keys():
+                            result[key] = metrics[key]
                 
-            except ValueError:
-                print("Empty collection {}. Skipping...".format(coll_name))
-                continue
+                    ### unsupervised statistics
+                    statistics = call(db_param,coll_name)
+                    elapsed = time.time() - start
+                    result["eval_time"] = elapsed
+            
+                    # unroll statistics and metrics so that result is flat
+                    for key in statistics.keys():
+                        stat = statistics[key]
+                        
+                        if type(stat) == dict:
+                            for subkey in stat.keys():
+                                kn = "{}_{}".format(key,subkey)
+                                result[kn] = stat[subkey]
+                        else:
+                            result[key] = stat
+            
+                    # create a few new ones
+                    result["overlaps_per_object"] = len(result["overlaps"]) / result["traj_count"]
+                    result["percent_backwards"] = len(result["backward_cars"]) / result["traj_count"]
+                    result["MAE_x"] = np.mean(np.abs(result["state_error"][:,0]))
+            
+                    
+             
+                    ### Save results dict in /data/eval_results
+                    with open(save_name, 'wb') as f:
+                        pickle.dump(result, f)
+                    pc = coll_name
+                    
+                except ValueError:
+                    print("Empty collection {}. Skipping...".format(coll_name))
+                    continue
         
     ### clean up
     if collection_cleanup: db_cleanup(dbw)
+
+    dash(pc = pc)

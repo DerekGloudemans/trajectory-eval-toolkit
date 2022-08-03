@@ -1090,7 +1090,7 @@ def gen_pane(results = [],
     # create placeholder panes
     pane_size = []
     pane_loc = []
-    for pane in panes:
+    for pane in pane_layout:
         color = color_pallette[-1].tolist()
         pane_coords = (int(pane[0]*size[0]/9 + pad),int(pane[1]*size[1]/16) + pad), (int((pane[0] + pane[2])*size[0]/9 - pad),int((pane[1] + pane[3])*size[1]/16 - pad))
         shadow_coords = (int(pane[0]*size[0]/9 + pad),int(pane[1]*size[1]/16) + pad), (int((pane[0] + pane[2])*size[0]/9 - shadow_pad),int((pane[1] + pane[3])*size[1]/16 - shadow_pad))
@@ -1166,18 +1166,20 @@ def agg_score(result):
 
 #%% TO BE IMPLEMENTED
     
-if __name__ == "__main__":
+def main(pc = None,sc = None):
+    print("Generating Results Dashboard...")
     
-    plt.figure()
-    plt.plot([0,1],[0,1])
-    plt.savefig("test.png")
     # load each result
     results = [
         #"/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/morose_panda--RAW_GT1_castigates.cpkl",
         "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/paradoxical_wallaby--RAW_GT1__boggles.cpkl",
         "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/paradoxical_wallaby--RAW_GT1.cpkl",
         ]
-    #results.reverse()
+    if pc is not None:
+        results[0] = "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/{}.cpkl".format(pc)
+    if sc is not None:
+        results[1] = "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/{}.cpkl".format(sc),
+    
 
     for i in range(len(results)):
         with open(results[i],"rb") as f:
@@ -1211,5 +1213,8 @@ if __name__ == "__main__":
              pane_functions= pane_functions,
              )
     
+    
+if __name__ == "__main__":
+    main()
     
    
