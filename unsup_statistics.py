@@ -60,27 +60,20 @@ class UnsupervisedEvaluator():
         db_raw = client.client["trajectories"]
         db_rec = client.client["reconciled"]
         
-        if collection_name in db_raw.list_collection_names():
-            db_read_name = "trajectories"
-        elif collection_name in db_rec.list_collection_names():
-            db_read_name = "reconciled"
-        else:
-            print(collection_name, "not in database trajectories or reconciled")
-        # db_read_name = config["database_name"]    
-        print("db_read_name: ", db_read_name)
         print("N collections before transformation: {} {} {}".format(len(db_raw.list_collection_names()),len(db_rec.list_collection_names()),len(db_time.list_collection_names())))
         # start transform trajectory-indexed collection to time-indexed collection if not already exist
         # this will create a new collection in the "transformed" database with the same collection name as in "trajectory" database
         if collection_name not in db_time.list_collection_names(): # always overwrite
             print("Transform to time-indexed collection first")
-            client.transform(read_database_name=db_read_name, 
+            client.transform(read_database_name=config["database_name"], 
                       read_collection_name=collection_name)
            
         print("N collections after transformation: {} {} {}".format(len(db_raw.list_collection_names()),len(db_rec.list_collection_names()),len(db_time.list_collection_names())))
         
         print(config,collection_name)
-        self.dbr_v = DBClient(**config, database_name = "trajectories", collection_name = collection_name)
-        self.dbr_t = DBClient(**config, database_name = "transformed", collection_name = collection_name)
+        self.dbr_v = DBClient(**config, collection_name = collection_name)
+        self.dbr_t = DBClient(host=config["host"], port=config["port"], username=config["username"], password=config["password"],
+                              database_name = "transformed", collection_name = collection_name)
         print("connected to pymongo client")
         self.res = defaultdict(dict) # min, max, avg, stdev
         self.num_threads = num_threads
@@ -444,7 +437,7 @@ class UnsupervisedEvaluator():
 def call(db_param,collection):    
     ue = UnsupervisedEvaluator(db_param, collection_name=collection, num_threads=200)
     t1 = time.time()
-    # ue.traj_evaluate()
+    ue.traj_evaluate()
     ue.time_evaluate(sample_rate = 25)
     t2 = time.time()
     
@@ -465,8 +458,9 @@ if __name__ == '__main__':
       "port": 27017,
       "username": "i24-data",
       "password": "mongodb@i24",
+      "database_name": "reconciled" # db that the collection to evaluate is in
     }
-    collection = "pragmatic_doggo--RAW_GT1"
+    collection = "transcendent_snek--RAW_GT1__lionizes"
     
     res = call(param, collection)
     
