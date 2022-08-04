@@ -376,24 +376,17 @@ class UnsupervisedEvaluator():
                     # check if two boxes overlap, if so append the pair ids
                     if doOverlap(pts1, pts2):
                         overlap.append((str(east_ids[i]),str(east_ids[j])))
-                    # get space gap
-                    # gap = calc_space_gap(pts1, pts2)
-                    # if gap: space_gap.append(gap)
 
             # west bound
             try:
                 west_pts = np.matmul(west_b, west_m)
             except ValueError:
                 west_pts = []
-            # this can be optimized - not time consuming
             for i, pts1 in enumerate(west_pts):
                 for j, pts2 in enumerate(west_pts[i+1:]):
                     # check if two boxes overlap
                     if doOverlap(pts1, pts2):
                         overlap.append((str(west_ids[i]),str(west_ids[j])))
-                    # get space gap
-                    # gap = calc_space_gap(pts1, pts2)
-                    # if gap: space_gap.append(gap)
                         
             return overlap
 
@@ -403,14 +396,22 @@ class UnsupervisedEvaluator():
         # functions = [_get_min_spacing]
         for fcn in functions:
             time_cursor = self.dbr_t.collection.find({})
-            res = self.thread_pool(fcn, iterable=time_cursor) 
             attr_name = fcn.__name__[5:]
             print(f"Evaluating {attr_name}...")
             if "overlap" in attr_name:
                 overlaps = set()
-                dummy = [overlaps.add(rr) for r in res for rr in r]
+                count = 0
+                for time_doc in time_cursor:
+                    if count % sample_rate == 0:
+                        overlap_t = _get_overlaps(time_doc)
+                        for pair in overlap_t:
+                            overlaps.add(pair)
+                    count += 1
+                
+                # dummy = [overlaps.add(rr) for r in res for rr in r]
                 self.res[attr_name] = list(overlaps)
             else:
+                res = self.thread_pool(fcn, iterable=time_cursor) 
                 self.res[attr_name]["min"] = np.nanmin(res).item()
                 self.res[attr_name]["max"] = np.nanmax(res).item()
                 self.res[attr_name]["median"] = np.nanmedian(res).item()
@@ -418,7 +419,6 @@ class UnsupervisedEvaluator():
                 self.res[attr_name]["stdev"] = np.nanstd(res).item()
                 self.res[attr_name]["raw"] = res
 
-            
         return
     
 
@@ -444,8 +444,8 @@ class UnsupervisedEvaluator():
 def call(db_param,collection):    
     ue = UnsupervisedEvaluator(db_param, collection_name=collection, num_threads=200)
     t1 = time.time()
-    ue.traj_evaluate()
-    ue.time_evaluate()
+    # ue.traj_evaluate()
+    ue.time_evaluate(sample_rate = 25)
     t2 = time.time()
     
     print("time: ", t2-t1)
@@ -468,5 +468,5 @@ if __name__ == '__main__':
     }
     collection = "pragmatic_doggo--RAW_GT1"
     
-    call(param, collection)
+    res = call(param, collection)
     
