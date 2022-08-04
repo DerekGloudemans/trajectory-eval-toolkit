@@ -452,15 +452,20 @@ def call(db_param,collection):
 if __name__ == '__main__':
     # with open('config.json') as f:
     #     config = json.load(f)
+      
+    collection = "transcendent_snek--RAW_GT1__lionizes"
+    if "__" in collection:
+        database_name = "reconciled"
+    else:
+        databas_name = "trajectories"
         
     param = {
       "host": "10.2.218.56",
       "port": 27017,
       "username": "i24-data",
       "password": "mongodb@i24",
-      "database_name": "reconciled" # db that the collection to evaluate is in
+      "database_name": database_name # db that the collection to evaluate is in
     }
-    collection = "transcendent_snek--RAW_GT1__lionizes"
     
     res = call(param, collection)
     
