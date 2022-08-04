@@ -71,7 +71,7 @@ class UnsupervisedEvaluator():
         print("N collections before transformation: {} {} {}".format(len(db_raw.list_collection_names()),len(db_rec.list_collection_names()),len(db_time.list_collection_names())))
         # start transform trajectory-indexed collection to time-indexed collection if not already exist
         # this will create a new collection in the "transformed" database with the same collection name as in "trajectory" database
-        if True or collection_name not in db_time.list_collection_names(): # always overwrite
+        if collection_name not in db_time.list_collection_names(): # always overwrite
             print("Transform to time-indexed collection first")
             client.transform(read_database_name=db_read_name, 
                       read_collection_name=collection_name)
@@ -79,10 +79,8 @@ class UnsupervisedEvaluator():
         print("N collections after transformation: {} {} {}".format(len(db_raw.list_collection_names()),len(db_rec.list_collection_names()),len(db_time.list_collection_names())))
         
         print(config,collection_name)
-        self.dbr_v = DBClient(**config, collection_name = collection_name)
-        config2 = config.copy()
-        config2["database_name"] = "transformed"
-        self.dbr_t = DBClient(**config2, collection_name = collection_name)
+        self.dbr_v = DBClient(**config, database_name = "trajectories", collection_name = collection_name)
+        self.dbr_t = DBClient(**config, database_name = "transformed", collection_name = collection_name)
         print("connected to pymongo client")
         self.res = defaultdict(dict) # min, max, avg, stdev
         self.num_threads = num_threads
@@ -466,34 +464,9 @@ if __name__ == '__main__':
       "host": "10.2.218.56",
       "port": 27017,
       "username": "i24-data",
-      "readonly_user":"i24-data",
       "password": "mongodb@i24",
-      "db_name": "trajectories",
-      "raw_collection": "NA",
-      
-      "server_id": 1,
-      "session_config_id": 1
     }
+    collection = "pragmatic_doggo--RAW_GT1"
     
-    trajectory_database = "trajectories"
-    timestamp_database = "transformed"
-    collection = "21_07_2022_gt1_alpha"
-    # collection = "groundtruth_scene_1"
-    collection = "pristine_sssnek--RAW_TRACKS"
-
-    ue = UnsupervisedEvaluator(param, trajectory_database=trajectory_database, timestamp_database = timestamp_database,
-                               collection_name=collection, num_threads=200)
-    t1 = time.time()
-    ue.traj_evaluate()
-    ue.time_evaluate()
-    t2 = time.time()
+    call(param, collection)
     
-    print("time: ", t2-t1)
-    ue.print_res()
-    ue.save_res()
-    
-    
-    #%%
-    # fragment_list = [ObjectId('62d5a345172006d4926ddae3'), ObjectId('62d5a240172006d4926ddab7')]
-    # # rec_id = ObjectId("62c730078b650aa00a3b925f")
-    # ue.plot_fragments(fragment_list)
