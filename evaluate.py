@@ -29,7 +29,7 @@ def db_cleanup(dbw):
             break
         else:
             if inp in existing_collections:
-                dbw.delete_collection([inp])
+                dbw.delete_collections([inp])
 
 # adj_list = ["admissible",
 #             "ostentatious",
@@ -97,6 +97,8 @@ if __name__ == "__main__":
     pc  = None
     
     for db_name in ["trajectories","reconciled"]:
+        to_remove = []
+
         db_param = {
               #"default_host": "10.2.218.56",
               #"default_port": 27017,
@@ -120,7 +122,11 @@ if __name__ == "__main__":
         IOUT = 0.3
         collection_cleanup = False
         #coll_name = "paradoxical_wallaby--RAW_GT1__boggles"     ; append_db = False
-        coll_name = None ; append_db  = True
+        coll_name = None 
+        
+        append_db = False
+        if db_name == "trajectories": append_db  = True
+        
         TAG = "GT1"
     
     
@@ -128,7 +134,7 @@ if __name__ == "__main__":
         dbw   = DBClient(**db_param)
         existing_collections = dbw.list_collection_names() # list all collections
         existing_collections.sort()
-        print("Existing Collections in database {}:".format(dbw.database_name)) 
+        print("\n Existing Collections in database -  {}:".format(dbw.database_name)) 
         [print(item) for item in existing_collections]
         print("\n")
         
@@ -162,19 +168,25 @@ if __name__ == "__main__":
                 result["name"] = coll_name
                 result["iou_threshold"] = IOUT
     
-                try:
-                    
+                # try:
+                if True:
     
                     start = time.time()
                     ### supervised evaluation
                     if gt_coll is not None:
                         metrics = evaluate(db_param,gt_collection = gt_coll,pred_collection = coll_name, sample_freq = 30, break_sample = 2700,append_db = append_db,iou_threshold = IOUT)
+                        
+                        if metrics is None:
+                            to_remove.append(coll_name)
+                            continue
+                        
                         result["iou_threshold"] = IOUT
                         result["gt"] = gt_coll        
                         for key in metrics.keys():
                             result[key] = metrics[key]
                 
                     ### unsupervised statistics
+                    print(db_param)
                     statistics = call(db_param,coll_name)
                     elapsed = time.time() - start
                     result["eval_time"] = elapsed
@@ -202,11 +214,20 @@ if __name__ == "__main__":
                         pickle.dump(result, f)
                     pc = coll_name
                     
-                except ValueError:
-                    print("Empty collection {}. Skipping...".format(coll_name))
-                    continue
+                # except Exception as e:
+                #     print(e)
+                #     print("Empty collection {}. Skipping...".format(coll_name))
+                #     continue
+        
+        if len(to_remove) > 0:
+            print("\n The following collections are empty: {}".format(to_remove))
+            inp = input("Do you want to remove these collections? (Y/N)")
+            if inp == "Y":
+                dbw.delete_collections(to_remove)
+
         
     ### clean up
     if collection_cleanup: db_cleanup(dbw)
-
-    dash(pc = pc)
+    
+    
+    dash(pc = pc,close = 1000)

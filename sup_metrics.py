@@ -75,17 +75,22 @@ def evaluate(db_param,
     
     RESULT = {"postprocessed":True}
     
-    gtd   = DBReader(**db_param,collection_name = gt_collection)
     prd   = DBReader(**db_param,collection_name = pred_collection)
-    
     
     if append_db:
         dbw = DBWriter(**db_param,collection_name = pred_collection)
         print("Appending assigned gt_ids to predicted data collection.")
     
+    db_param2 = db_param.copy()
+    db_param2["database_name"] = "trajectories"
+    gtd   = DBReader(**db_param2,collection_name = gt_collection)
     
     gts = list(gtd.read_query(None))
     preds = list(prd.read_query(None))
+    
+    if len(preds) == 0:
+        print("Collection {} is empty".format(pred_collection))
+        return None
     
     n_gt_resample_points = {}
     n_pred_resample_points = {}

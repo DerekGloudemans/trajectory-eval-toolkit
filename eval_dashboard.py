@@ -15,6 +15,9 @@ from scipy.stats.kde import gaussian_kde
 from scipy.stats import norm
 import matplotlib.gridspec as grid_spec
 
+
+
+import colorsys
 """
 The basic idea is to create a grid of metric results, with each row corresponding to
 a collection and each column corresponding to a metric readout. Each individual 
@@ -32,6 +35,24 @@ Perhaps one additional row should be added with an explanation (as text) of each
 """
 There should also be a supplementary file with, for each metric, a description, and a best and worst value (for coloration)
 """
+
+def random_pallette(length):
+    sat = 0.3
+    var = 0.7
+    
+    # c_base = np.array([[200,100,100],
+    #                    [100,200,100],
+    #                    [0,0,255]])
+    colors = []
+    start_hue =  np.random.rand()
+
+    for i in range(length):
+        hue = (start_hue + (length//3)*i/length)%1
+        color =    colorsys.hsv_to_rgb(hue,sat,var)
+        color = np.array(color) * 255
+
+        colors.append(color)
+    return np.stack(colors)
 
 #%% Globals 
 global results_dir
@@ -99,6 +120,8 @@ color_pallette = np.array([[131, 121, 163], # for primary data
                            [220,220,220],   # for cmap
                            [255,255,255]    # for pane default color
                            ])
+color_pallette = random_pallette(10)
+color_pallette[-2:,:] = np.array([[220,220,220],[255,255,255]])
 
 global primary_colors
 primary_colors = (np.random.rand(8,3)-0.5) * 20 + color_pallette[0][None,:]
@@ -819,12 +842,11 @@ def history(results,figsize):
 def iou_scatter(results,figsize):
 
     
-    return
     
     fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
     ax = fig.add_subplot(111)
     
-    ridx =0
+    ridx =1
     x_val = results[ridx]["match_overlap"]["conf"]
     y_val = results[ridx]["match_overlap"]["iou"]
     # plot_windows = np.arange(0,1,0.025)
@@ -837,10 +859,17 @@ def iou_scatter(results,figsize):
     #     y_select = np.array(y_val)[select_idx]
     #     ax.scatter(x_select,y_select,alpha = 1/len(select_idx)**0.5,color = color_pallette[ridx]/255)
     
-    ax.scatter(x_val,y_val,alpha = 0.01,color =color_pallette[ridx]/255)
+    ax.scatter(x_val,y_val,alpha = 0.03,color =color_pallette[ridx]/255)
     
+    ax.set_ylim([0,1])
+    ax.set_ylabel("IOU",fontsize = 1500/scale)
+    ax.set_xlim([0,1])
+    ax.set_xlabel("Detection Confidence",fontsize = 1500/scale)
+    fig.text(0.5,0.94,"IOU v Confidence Correlation", va = "top", fontsize = 1500/scale)
     
-    fig.text(0.02,0.94,"temp title", va = "top", fontsize = 1000/scale)
+    ax.spines.right.set_visible(False)
+    ax.spines.top.set_visible(False)
+
     
     return f2a(fig)
 
@@ -1068,6 +1097,7 @@ def gen_pane(results = [],
              size = [2160,3840],
              pane_layout = None,
              pane_functions = None,
+             close = 0
              ):
     
     """
@@ -1116,7 +1146,7 @@ def gen_pane(results = [],
     # display image
     dashboard = cv2.resize(dashboard,(int(size[1]*0.95),int(size[0]*0.95)))
     cv2.imshow("frame",dashboard)
-    cv2.waitKey(0)
+    cv2.waitKey(close)
     cv2.destroyAllWindows()
     
     
@@ -1181,7 +1211,7 @@ def agg_score(result):
 
 #%% TO BE IMPLEMENTED
     
-def main(pc = None,sc = None):
+def main(pc = None,sc = None,close = 0):
     print("Generating Results Dashboard...")
     
     # load each result
@@ -1226,6 +1256,7 @@ def main(pc = None,sc = None):
     gen_pane(results = results,
              pane_layout = panes,
              pane_functions= pane_functions,
+             close = close
              )
     
     

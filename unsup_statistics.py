@@ -52,6 +52,7 @@ class UnsupervisedEvaluator():
         collection1 : str
             Collection name.
         '''
+        print(config)
         self.collection_name = collection_name
         
         client = DBClient(**config)
@@ -60,22 +61,28 @@ class UnsupervisedEvaluator():
         db_rec = client.client["reconciled"]
         
         if collection_name in db_raw.list_collection_names():
-            read_database_name = "trajectories"
+            db_read_name = "trajectories"
         elif collection_name in db_rec.list_collection_names():
-            read_database_name = "reconciled"
+            db_read_name = "reconciled"
         else:
             print(collection_name, "not in database trajectories or reconciled")
-            
+        # db_read_name = config["database_name"]    
+        print("db_read_name: ", db_read_name)
+        print("N collections before transformation: {} {} {}".format(len(db_raw.list_collection_names()),len(db_rec.list_collection_names()),len(db_time.list_collection_names())))
         # start transform trajectory-indexed collection to time-indexed collection if not already exist
         # this will create a new collection in the "transformed" database with the same collection name as in "trajectory" database
-        if collection_name not in db_time.list_collection_names():
+        if True or collection_name not in db_time.list_collection_names(): # always overwrite
             print("Transform to time-indexed collection first")
-            client.transform(read_database_name=read_database_name, 
+            client.transform(read_database_name=db_read_name, 
                       read_collection_name=collection_name)
-            
+           
+        print("N collections after transformation: {} {} {}".format(len(db_raw.list_collection_names()),len(db_rec.list_collection_names()),len(db_time.list_collection_names())))
+        
+        print(config,collection_name)
         self.dbr_v = DBClient(**config, collection_name = collection_name)
-        config["database_name"] = "transformed"
-        self.dbr_t = DBClient(**config, collection_name = collection_name)
+        config2 = config.copy()
+        config2["database_name"] = "transformed"
+        self.dbr_t = DBClient(**config2, collection_name = collection_name)
         print("connected to pymongo client")
         self.res = defaultdict(dict) # min, max, avg, stdev
         self.num_threads = num_threads
