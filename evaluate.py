@@ -93,9 +93,9 @@ def get_pickle(name):
 
 
     
-if __name__ == "__main__":
+def main():
     pc  = None
-    
+    sc = None
     for db_name in ["trajectories","reconciled"]:
         to_remove = []
 
@@ -212,7 +212,8 @@ if __name__ == "__main__":
                     ### Save results dict in /data/eval_results
                     with open(save_name, 'wb') as f:
                         pickle.dump(result, f)
-                    pc = coll_name
+         
+                    
                     
                 # except Exception as e:
                 #     print(e)
@@ -230,4 +231,8 @@ if __name__ == "__main__":
     if collection_cleanup: db_cleanup(dbw)
     
     
-    dash(pc = pc,close = 1000)
+    dash(mode = "latest v latest",close = 1000)
+    
+if __name__ == "__main__":
+    main()
+        

@@ -15,7 +15,7 @@ from scipy.stats.kde import gaussian_kde
 from scipy.stats import norm
 import matplotlib.gridspec as grid_spec
 
-
+from sklearn.linear_model import LinearRegression
 
 import colorsys
 """
@@ -37,8 +37,8 @@ There should also be a supplementary file with, for each metric, a description, 
 """
 
 def random_pallette(length):
-    sat = 0.3
-    var = 0.7
+    sat = 0.2
+    var = 0.8
     
     # c_base = np.array([[200,100,100],
     #                    [100,200,100],
@@ -459,7 +459,7 @@ def state_error(results,figsize):
 def unsup_hist(results,figsize):
     to_plot = ["x_traveled_raw","avg_vx_raw","avg_ax_raw"]
     units = ["ft","ft/s","ft/$s^2$"]
-    xrange_clip = [[-500,2000],[-10,200],[-200,200]]
+    xrange_clip = [[-500,2000],[-10,150],[-10,10]]
     
     fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
     # ax = fig.add_subplot(111)
@@ -859,13 +859,25 @@ def iou_scatter(results,figsize):
     #     y_select = np.array(y_val)[select_idx]
     #     ax.scatter(x_select,y_select,alpha = 1/len(select_idx)**0.5,color = color_pallette[ridx]/255)
     
-    ax.scatter(x_val,y_val,alpha = 0.03,color =color_pallette[ridx]/255)
+    ax.scatter(x_val,y_val,alpha = 0.02,color =color_pallette[ridx]/255, linewidths = 0)
     
     ax.set_ylim([0,1])
     ax.set_ylabel("IOU",fontsize = 1500/scale)
     ax.set_xlim([0,1])
     ax.set_xlabel("Detection Confidence",fontsize = 1500/scale)
+    ax.tick_params(axis='both', labelsize=1000/scale, length = 10)
     fig.text(0.5,0.94,"IOU v Confidence Correlation", va = "top", fontsize = 1500/scale)
+    
+   
+    
+    reg = LinearRegression().fit(np.array(x_val).reshape(-1,1),y_val)
+    y_reg = reg.predict(np.array([[0],[1]]))
+    score = reg.score(np.array(x_val).reshape(-1,1),y_val)
+    
+    plt.plot([0,1],y_reg,color = (1,0,0), linewidth = 2)
+    plt.text( 0.25, reg.predict(np.array([[0.25]])), "R$^2$ = {:.3f}".format(score), va = "bottom",fontsize = 1500/scale)
+    
+    
     
     ax.spines.right.set_visible(False)
     ax.spines.top.set_visible(False)
@@ -1211,19 +1223,78 @@ def agg_score(result):
 
 #%% TO BE IMPLEMENTED
     
-def main(pc = None,sc = None,close = 0):
+def main(mode = "latest v latest", close = 0):
     print("Generating Results Dashboard...")
     
-    # load each result
-    results = [
-        #"/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/morose_panda--RAW_GT1_castigates.cpkl",
-        "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/paradoxical_wallaby--RAW_GT1__boggles.cpkl",
-        "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/paradoxical_wallaby--RAW_GT1.cpkl",
-        ]
-    if pc is not None:
-        results[0] = "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/{}.cpkl".format(pc)
-    if sc is not None:
-        results[1] = "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/{}.cpkl".format(sc),
+    if mode == "latest v latest": # atest raw and latest post
+    
+        latest_raw_path = None
+        latest_raw_time = None
+        latest_post_path = None
+        latest_post_time = None
+        directory = "./data/eval_results"
+        for result_path in os.listdir(directory):
+            path = os.path.join(directory,result_path)
+            with open(path,"rb") as f:
+                result = pickle.load(f)
+                
+                if not result["postprocessed"] and (latest_raw_time is None or result["gen_time"] > latest_raw_time):
+                    latest_raw_time = result["gen_time"]
+                    latest_raw_path = path
+                
+                elif result["postprocessed"]  and (latest_post_time is None or result["gen_time"] > latest_post_time):
+                    latest_post_time = result["gen_time"]
+                    latest_post_path = path
+        results = [latest_post_path,latest_raw_path]
+    
+    elif mode == "latest v best": # latest and best 
+
+        latest_post_path = None
+        latest_post_time = None
+        best_path = None
+        best_score = None
+        directory = "./data/eval_results"
+        for result_path in os.listdir(directory):
+            path = os.path.join(directory,result_path)
+            with open(path,"rb") as f:
+                result = pickle.load(f)
+                result = agg_score(result)
+                if best_score is None or result["Aggregate Score"] > best_score:
+                    best_score = result["Aggregate Score"]
+                    best_path = path
+                
+                elif  (latest_post_time is None or result["gen_time"] > latest_post_time):
+                    latest_post_time = result["gen_time"]
+                    latest_post_path = path
+        results = [latest_post_path,best_path]
+    
+    elif mode == "best v best": # best post and best raw
+        best_post_path = None
+        best_post_score = None
+        best_raw_path = None
+        best_raw_score = None
+        directory = "./data/eval_results"
+        for result_path in os.listdir(directory):
+            path = os.path.join(directory,result_path)
+            with open(path,"rb") as f:
+                result = pickle.load(f)
+                result = agg_score(result)
+                if not result["postprocessed"] and (best_raw_score is None or result["Aggregate Score"] > best_raw_score):
+                    best_raw_score = result["Aggregate Score"]
+                    best_raw_path = path
+                
+                elif  (best_post_score is None or result["Aggregate Score"] > best_post_score):
+                    best_post_score = result["Aggregate Score"]
+                    best_post_path = path
+        results = [best_post_path,best_raw_path]
+    
+    else:
+        results = [
+            #"/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/morose_panda--RAW_GT1_castigates.cpkl",
+            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/jubilant_forengi--RAW_GT1__escalates.cpkl",
+            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/paradoxical_wallaby--RAW_GT1__boggles.cpkl",
+            ]
+    
     
 
     for i in range(len(results)):
