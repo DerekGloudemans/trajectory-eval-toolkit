@@ -60,29 +60,20 @@ class UnsupervisedEvaluator():
         db_raw = client.client["trajectories"]
         db_rec = client.client["reconciled"]
         
-        if collection_name in db_raw.list_collection_names():
-            db_read_name = "trajectories"
-        elif collection_name in db_rec.list_collection_names():
-            db_read_name = "reconciled"
-        else:
-            print(collection_name, "not in database trajectories or reconciled")
-        # db_read_name = config["database_name"]    
-        print("db_read_name: ", db_read_name)
         print("N collections before transformation: {} {} {}".format(len(db_raw.list_collection_names()),len(db_rec.list_collection_names()),len(db_time.list_collection_names())))
         # start transform trajectory-indexed collection to time-indexed collection if not already exist
         # this will create a new collection in the "transformed" database with the same collection name as in "trajectory" database
-        if True or collection_name not in db_time.list_collection_names(): # always overwrite
+        if collection_name not in db_time.list_collection_names(): # always overwrite
             print("Transform to time-indexed collection first")
-            client.transform(read_database_name=db_read_name, 
+            client.transform(read_database_name=config["database_name"], 
                       read_collection_name=collection_name)
            
         print("N collections after transformation: {} {} {}".format(len(db_raw.list_collection_names()),len(db_rec.list_collection_names()),len(db_time.list_collection_names())))
         
         print(config,collection_name)
         self.dbr_v = DBClient(**config, collection_name = collection_name)
-        config2 = config.copy()
-        config2["database_name"] = "transformed"
-        self.dbr_t = DBClient(**config2, collection_name = collection_name)
+        self.dbr_t = DBClient(host=config["host"], port=config["port"], username=config["username"], password=config["password"],
+                              database_name = "transformed", collection_name = collection_name)
         print("connected to pymongo client")
         self.res = defaultdict(dict) # min, max, avg, stdev
         self.num_threads = num_threads
@@ -378,24 +369,17 @@ class UnsupervisedEvaluator():
                     # check if two boxes overlap, if so append the pair ids
                     if doOverlap(pts1, pts2):
                         overlap.append((str(east_ids[i]),str(east_ids[j])))
-                    # get space gap
-                    # gap = calc_space_gap(pts1, pts2)
-                    # if gap: space_gap.append(gap)
 
             # west bound
             try:
                 west_pts = np.matmul(west_b, west_m)
             except ValueError:
                 west_pts = []
-            # this can be optimized - not time consuming
             for i, pts1 in enumerate(west_pts):
                 for j, pts2 in enumerate(west_pts[i+1:]):
                     # check if two boxes overlap
                     if doOverlap(pts1, pts2):
                         overlap.append((str(west_ids[i]),str(west_ids[j])))
-                    # get space gap
-                    # gap = calc_space_gap(pts1, pts2)
-                    # if gap: space_gap.append(gap)
                         
             return overlap
 
@@ -405,14 +389,22 @@ class UnsupervisedEvaluator():
         # functions = [_get_min_spacing]
         for fcn in functions:
             time_cursor = self.dbr_t.collection.find({})
-            res = self.thread_pool(fcn, iterable=time_cursor) 
             attr_name = fcn.__name__[5:]
             print(f"Evaluating {attr_name}...")
             if "overlap" in attr_name:
                 overlaps = set()
-                dummy = [overlaps.add(rr) for r in res for rr in r]
+                count = 0
+                for time_doc in time_cursor:
+                    if count % sample_rate == 0:
+                        overlap_t = _get_overlaps(time_doc)
+                        for pair in overlap_t:
+                            overlaps.add(pair)
+                    count += 1
+                
+                # dummy = [overlaps.add(rr) for r in res for rr in r]
                 self.res[attr_name] = list(overlaps)
             else:
+                res = self.thread_pool(fcn, iterable=time_cursor) 
                 self.res[attr_name]["min"] = np.nanmin(res).item()
                 self.res[attr_name]["max"] = np.nanmax(res).item()
                 self.res[attr_name]["median"] = np.nanmedian(res).item()
@@ -420,7 +412,6 @@ class UnsupervisedEvaluator():
                 self.res[attr_name]["stdev"] = np.nanstd(res).item()
                 self.res[attr_name]["raw"] = res
 
-            
         return
     
 
@@ -447,7 +438,7 @@ def call(db_param,collection):
     ue = UnsupervisedEvaluator(db_param, collection_name=collection, num_threads=200)
     t1 = time.time()
     ue.traj_evaluate()
-    ue.time_evaluate()
+    ue.time_evaluate(sample_rate = 25)
     t2 = time.time()
     
     print("time: ", t2-t1)
@@ -461,39 +452,20 @@ def call(db_param,collection):
 if __name__ == '__main__':
     # with open('config.json') as f:
     #     config = json.load(f)
+      
+    collection = "transcendent_snek--RAW_GT1__lionizes"
+    if "__" in collection:
+        database_name = "reconciled"
+    else:
+        databas_name = "trajectories"
         
     param = {
       "host": "10.2.218.56",
       "port": 27017,
       "username": "i24-data",
-      "readonly_user":"i24-data",
       "password": "mongodb@i24",
-      "db_name": "trajectories",
-      "raw_collection": "NA",
-      
-      "server_id": 1,
-      "session_config_id": 1
+      "database_name": database_name # db that the collection to evaluate is in
     }
     
-    trajectory_database = "trajectories"
-    timestamp_database = "transformed"
-    collection = "21_07_2022_gt1_alpha"
-    # collection = "groundtruth_scene_1"
-    collection = "pristine_sssnek--RAW_TRACKS"
-
-    ue = UnsupervisedEvaluator(param, trajectory_database=trajectory_database, timestamp_database = timestamp_database,
-                               collection_name=collection, num_threads=200)
-    t1 = time.time()
-    ue.traj_evaluate()
-    ue.time_evaluate()
-    t2 = time.time()
+    res = call(param, collection)
     
-    print("time: ", t2-t1)
-    ue.print_res()
-    ue.save_res()
-    
-    
-    #%%
-    # fragment_list = [ObjectId('62d5a345172006d4926ddae3'), ObjectId('62d5a240172006d4926ddab7')]
-    # # rec_id = ObjectId("62c730078b650aa00a3b925f")
-    # ue.plot_fragments(fragment_list)
