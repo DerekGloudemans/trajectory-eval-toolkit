@@ -396,7 +396,7 @@ def evaluate(db_param,
     total_pred = len(pred_dict)
     
     RESULT["x_variation"] = diffx/travelled
-    RESULT["y_variation"] = diffy/total_pred
+    RESULT["y_variation"] = diffy
     
     
     # Roadway extents

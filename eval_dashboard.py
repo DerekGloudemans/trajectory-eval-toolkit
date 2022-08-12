@@ -75,8 +75,10 @@ MD = {
     "idr":{"text":"ID-Recall","best":1,"bad":0.5},
     "idp":{"text":"ID-Precision","best":1,"bad":0.5},
     "idf1":{"text":"ID-F1","best":1,"bad":0.5},
-    "avg_ax_raw":{"text":"Average Acceleration"},
-    "avg_vx_raw":{"text":"Average Speed"},
+    "avg_ax_raw":{"text":"Average Acceleration per traj"},
+    "avg_vx_raw":{"text":"Average Speed per traj"},
+    "vx_raw":{"text":"Velocity"},
+    "ax_raw":{"text":"Acceleration"},
     "x_traveled_raw":{"text":"Trajectory Length","best":2000,"bad":300},
     "x_traveled_avg":{"text":"Trajectory Length","best":2000,"bad":300},
     "bps":{"text":"Hz","best":30,"bad":1},
@@ -93,8 +95,8 @@ MD = {
     "pred_avg_matches":{"text":"GT IDs / Pred","best":1,"bad":2},
     "gt_avg_matches":{"text":"Pred IDs / GT","best":1,"bad":2},
     "per_gt_recall":{"text":"Recall / GT","best":1,"bad":0},
-    "per_pred_precision":{"text":"Precision / GT","best":1,"bad":0}
-
+    "per_pred_precision":{"text":"Precision / Pred","best":1,"bad":0},
+    "residual_raw":{"text": "Post Residual"}
     }
 
 global color_pallette 
@@ -165,7 +167,10 @@ def f2a(fig):
 def gen_title(results,figsize):
     name = results[0]["name"]
     iou = results[0]["iou_threshold"]
-    comment = results[0]["description"]
+    try:
+        comment = results[0]["description"]
+    except:
+        comment = ""
     gt_dataset = results[0]["gt"]
     
     
@@ -457,10 +462,14 @@ def state_error(results,figsize):
     return f2a(fig)
   
 def unsup_hist(results,figsize):
-    to_plot = ["x_traveled_raw","avg_vx_raw","avg_ax_raw"]
-    units = ["ft","ft/s","ft/$s^2$"]
-    xrange_clip = [[-500,2000],[-10,150],[-10,10]]
     
+    to_plot = ["x_traveled_raw","avg_vx_raw","avg_ax_raw","vx_raw","ax_raw","residual_raw"]
+    
+    if "residual_raw" not in results[0].keys() or sum(results[0]["residual_raw"]) == 0:
+        to_plot = ["x_traveled_raw","avg_vx_raw","avg_ax_raw","vx_raw","ax_raw"]
+    
+    units = ["ft","ft/s","ft/$s^2$","ft/s","ft/$s^2$","ft"]
+    xrange_clip = [[-500,2000],[0,150],[-8,8],[0,150],[-8,8],[0,100]]
     fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
     # ax = fig.add_subplot(111)
     # ax.spines.top.set_visible(False)
@@ -469,23 +478,28 @@ def unsup_hist(results,figsize):
     
     # get data
     data = [results[0][key] for key in to_plot]
-    data = np.stack(data)
+    #data = np.stack(data)
     #xx = np.arange(-8,8,0.05)
     data_pdf = []
-    for i in range(data.shape[0]):
+    for i in range(len(data)):
         pdf = gaussian_kde(data[i])
         xx = np.arange(np.min(data[i]),np.max(data[i]),1)
+        xx = np.linspace(np.min(data[i]),np.max(data[i]),200)
         data_pdf.append([xx,pdf(xx)])
     #data_pdf = np.stack(data_pdf)
     
     if len(results) > 1:
         data2 = [results[1][key] for key in to_plot]
-        data2 = np.stack(data2)
+        #data2 = np.stack(data2)
         data2_pdf = []
-        for i in range(data2.shape[0]):
-            pdf = gaussian_kde(data2[i])
-            xx = np.arange(np.min(data2[i]),np.max(data2[i]),1)
-            data2_pdf.append([xx,pdf(xx)])
+        for i in range(len(data2)):
+            try:
+                pdf = gaussian_kde(data2[i])
+                xx = np.arange(np.min(data2[i]),np.max(data2[i]),1)
+                xx = np.linspace(np.min(data[i]),np.max(data[i]),200)
+                data2_pdf.append([xx,pdf(xx)])
+            except:
+                data2_pdf.append([[0],[0]])
         #data2_pdf = np.stack(data2_pdf)
     
     gs = (grid_spec.GridSpec(len(data),1))
@@ -493,6 +507,10 @@ def unsup_hist(results,figsize):
     #creating empty list
     ax_objs = []
     for didx in range(len(data_pdf)):
+        
+        if to_plot[didx] not in results[0].keys():
+            continue
+        
         xx,dataD = data_pdf[didx]
         # creating new axes object and appending to ax_objs
         ax_objs.append(fig.add_subplot(gs[didx:didx+1, 0:]))
@@ -502,7 +520,7 @@ def unsup_hist(results,figsize):
 
         # plotting the distribution
         # filling the space beneath the distribution
-        if len(results) > 1:
+        if len(results) > 1 and to_plot[didx] in results[1].keys():
             xx2,dataD2 = data2_pdf[didx]
             ax_objs[-1].fill_between(xx2,dataD2,alpha = 1,color = color_pallette[1]/255)
             ax_objs[-1].plot(xx2,dataD2,color = color_pallette[1]/255)
@@ -668,7 +686,7 @@ def chart_unsup(results,figsize):
             if quant in result.keys():
                 data[qidx,ridx] = result[quant]
             else:
-                data[qidx,ridx] = np.nan
+                data[qidx,ridx] = 0
         data[qidx,-1] = MD[quant]["best"]
     
     # normalize data by max data[:,0]
@@ -725,8 +743,8 @@ def history(results,figsize):
     PSCALE = 3000                       # adjust avg size
 
     primary_metric = "Aggregate Score" # must be in spider
-    secondary_metric = "Speed" # adjusts size, must be in spider
-    tertiary_metric = "mota" # adjusts transparency
+    secondary_metric = "Realtime" # adjusts size, must be in spider
+    tertiary_metric = "recall" # adjusts transparency
     x_metric = "gen_time"
     
     names = []
@@ -760,13 +778,14 @@ def history(results,figsize):
     
     best_idx = np.argmax(np.array(primaries))
     for idx in range(len(names)):
+        #print(names[idx])
         x = datetimes[idx]
         y = primaries[idx]
         s = PSCALE * np.power(secondaries[idx],secondary_scale_power)
         color =  color_pallette[-2]/255
-        fc= color #if postprocessed[idx] else "none"
+        fc= color if not postprocessed[idx] else "none"
         plt.scatter(x,y,s,facecolor = fc,alpha = tertiaries[idx])
-        if not postprocessed[idx]:
+        if postprocessed[idx]:
             plt.scatter(x,y,s,linewidth = 2,edgecolor =  (.3,.3,.3),facecolor = fc)
 
         if idx == best_idx or names[idx] == results[0]["name"] or names[idx] == results[1]["name"]:
@@ -774,12 +793,13 @@ def history(results,figsize):
             plt.text(x,y+0*(rn),text_name,va = "center", ha = "center",fontsize = 600/scale,rotation = 0)
     
     # plot ties
-    for i in range(len(names)):
-        for j in range(len(names)):
-            if postprocessed[i] and not postprocessed[j] and raw_names[i] == raw_names[j]: 
-                x = [datetimes[i],datetimes[j]]
-                y = [primaries[i],primaries[j]]
-                plt.plot(x,y,linestyle = ":", color = (.3,.3,.3),linewidth = 1)
+    if False:
+        for i in range(len(names)):
+            for j in range(len(names)):
+                if postprocessed[i] and not postprocessed[j] and raw_names[i] == raw_names[j]: 
+                    x = [datetimes[i],datetimes[j]]
+                    y = [primaries[i],primaries[j]]
+                    plt.plot(x,y,linestyle = ":", color = (.3,.3,.3),linewidth = 1)
     
     if x_metric == "gen_time":
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
@@ -1195,7 +1215,7 @@ def agg_score(result):
     
     spider = {}
     spider["MOTA"]              = result["mota"]
-    spider["Speed"]             = result["bps"] / 30
+    spider["Realtime"]             = result["bps"] / 30
     spider["X Error"]           = max(0, 1 - result["MAE_x"] / 5.0  )
     spider["% to Extents"]      = (  result["cause_of_death"]["Exit FOV"] + result["cause_of_death"]["Active at End"] )    /result["n_pred"]
     spider["Trajectory Length"] = result["x_traveled_avg"] /  (sum(result["gt_x_traveled"])/len(result["gt_x_traveled"]))
@@ -1206,7 +1226,7 @@ def agg_score(result):
     
     score_weighting = {
         "MOTA":2,
-        "Speed":2,
+        "Realtime":2,
         "% to Extents":0.5,
         "X Error":1,
         "Trajectory Length":1,
@@ -1291,9 +1311,14 @@ def main(mode = "latest v latest", close = 0):
     else:
         results = [
             #"/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/morose_panda--RAW_GT1_castigates.cpkl",
-            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/jubilant_forengi--RAW_GT1__escalates.cpkl",
-            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/paradoxical_wallaby--RAW_GT1__boggles.cpkl",
+            #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/jubilant_stork--RAW_GT1__initiates.cpkl",
+            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/demure_wallaby--RAW_GT1__negotiates.cpkl",
+            #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/trivial_axylotl--RAW_GT1__harasses.cpkl",
+            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/sympathetic_osprey--RAW_GT1__juxtaposes.cpkl",
+            #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/pristine_stork--RAW_GT1__negotiates.cpkl",
+            #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/pristine_stork--RAW_GT1__cajoles.cpkl",
             ]
+    #results.reverse()
     
     
 
@@ -1309,12 +1334,12 @@ def main(mode = "latest v latest", close = 0):
 
                       [4,0.5,4,0.5], # Unsupervised Summary     #
                       [4,1,4,2],     # Unsupervised General (List)
-                      [4,3,4,4],     # Unsupervised Histograms     #
-                      [4,7,4,2],     # Conf Var Dist
+                      [4,3,4,6],     # Unsupervised Histograms     #
+                      [8,8,4,1],     # Conf Var Dist
                       
                       [8,0.5,8,0.5], # Supervised Summary      #
                       [8,1,4,4], # MOT metrics (1-norm)        #
-                      [8,5,4,4], # Confusion Matrix            #
+                      [8,5,4,3], # Confusion Matrix            #
  
                       [12,1,4,4], # State error                #  
                       [12,5,4,2], # MOT chart
@@ -1332,6 +1357,5 @@ def main(mode = "latest v latest", close = 0):
     
     
 if __name__ == "__main__":
-    main()
-    
+    main(mode = "manual")
    

@@ -1,7 +1,7 @@
 
 
 from sup_metrics     import evaluate
-from unsup_statistics   import call
+from unsup_statistics2   import call
 
 from i24_database_api import DBClient
 
@@ -15,7 +15,32 @@ warnings.filterwarnings("ignore")
 
 from eval_dashboard import main as dash
 
-def db_cleanup(dbw):
+def db_cleanup():
+    db_param = {
+          #"default_host": "10.2.218.56",
+          #"default_port": 27017,
+          "host":"10.2.218.56",
+          "port":27017,
+          "username":"i24-data",
+          "password":"mongodb@i24",
+          #"default_username": "i24-data",
+          #"readonly_user":"i24-data",
+          #"default_password": "mongodb@i24",
+          "database_name": "trajectories",      
+          "server_id": 1,
+          "session_config_id": 1,
+          #"trajectory_database":"trajectories",
+          #"timestamp_database":"transformed"
+          }
+
+    # connect to database
+    dbw   = DBClient(**db_param)
+    existing_collections = dbw.list_collection_names() # list all collections
+    existing_collections.sort()
+    print("\n Existing Collections in database -  {}:".format(dbw.database_name)) 
+    [print(item) for item in existing_collections]
+    print("\n")
+    
     
     while True:
         existing_collections = dbw.db.list_collection_names() # list all collections
@@ -117,12 +142,13 @@ def main():
               }
     
 
-        gt_coll = "groundtruth_scene_1"
+        #gt_coll = "groundtruth_scene_1"
+        gt_coll = "groundtruth_scene_1_130"
         #gt_coll = None
         IOUT = 0.3
         collection_cleanup = False
         #coll_name = "paradoxical_wallaby--RAW_GT1__boggles"     ; append_db = False
-        coll_name = None 
+        coll_name = None
         
         append_db = False
         if db_name == "trajectories": append_db  = True
@@ -209,18 +235,12 @@ def main():
             
                     
              
-                    ### Save results dict in /data/eval_results
+                    ## Save results dict in /data/eval_results
                     with open(save_name, 'wb') as f:
                         pickle.dump(result, f)
          
-                    
-                    
-                # except Exception as e:
-                #     print(e)
-                #     print("Empty collection {}. Skipping...".format(coll_name))
-                #     continue
         
-        if len(to_remove) > 0:
+        if True and len(to_remove) > 0:
             print("\n The following collections are empty: {}".format(to_remove))
             inp = input("Do you want to remove these collections? (Y/N)")
             if inp == "Y":

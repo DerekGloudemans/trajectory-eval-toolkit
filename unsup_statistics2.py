@@ -29,18 +29,192 @@ TODO
 from i24_database_api import DBClient
 
 import matplotlib.pyplot as plt
-import warnings
 from bson.objectid import ObjectId
 import pprint
-from threading import Thread
 import json
 import numpy as np
 from collections import defaultdict
 from multiprocessing.pool import ThreadPool
 import time
 
+# local functions
+def _get_duration(traj):
+    return traj["last_timestamp"] - traj["first_timestamp"]
+
+def _get_x_traveled(traj):
+    x = abs(traj["ending_x"] - traj["starting_x"])
+    return x
+
+def _get_y_traveled(traj):
+    return max(traj["y_position"]) - min(traj["y_position"])
+
+def _get_max_vx(traj):
+    dx = np.diff(traj["x_position"]) * traj["direction"]
+    dt = np.diff(traj["timestamp"])
+    try: return max(dx/dt)
+    except: return np.nan
+
+def _get_min_vx(traj):
+    dx = np.diff(traj["x_position"]) * traj["direction"]
+    dt = np.diff(traj["timestamp"])
+    try: return min(dx/dt)
+    except: return np.nan
+
+def _get_backward_cars(traj):
+    dx = np.diff(traj["x_position"]) * traj["direction"]
+    if np.any(dx < 0):
+        return str(traj['_id'])
+    return None
+
+def _get_max_vy(traj):
+    dy = np.diff(traj["y_position"])
+    dt = np.diff(traj["timestamp"])
+    try: return max(dy/dt)
+    except: return np.nan
+
+def _get_min_vy(traj):
+    dy = np.diff(traj["y_position"])
+    dt = np.diff(traj["timestamp"])
+    try: return min(dy/dt)
+    except: return np.nan
+    
+def _get_avg_vx(traj):
+    dx = np.diff(traj["x_position"])
+    dt = np.diff(traj["timestamp"])
+    try: return np.abs(np.average(dx/dt))
+    except: return np.nan
+
+def _get_avg_vy(traj):
+    dy = np.diff(traj["y_position"])
+    dt = np.diff(traj["timestamp"])
+    try: return np.average(dy/dt)
+    except: return np.nan
+    
+def _get_avg_ax(traj):
+    ddx = np.diff(traj["x_position"], 2)
+    dt = np.diff(traj["timestamp"])[:-1]
+    try: return np.mean(ddx/(dt**2))
+    except: return np.nan
+
+def _get_min_ax(traj):
+    ddx = np.diff(traj["x_position"], 2)
+    dt = np.diff(traj["timestamp"])[:-1]
+    try: return min(ddx/(dt**2))
+    except: return np.nan
+
+def _get_max_ax(traj):
+    ddx = np.diff(traj["x_position"], 2)
+    dt = np.diff(traj["timestamp"])[:-1]
+    try: return max(ddx/(dt**2))
+    except: return np.nan
+    
+def _get_avg_ax(traj):
+    ddx = np.diff(traj["x_position"], 2)
+    dt = np.diff(traj["timestamp"])[:-1]
+    try: return np.mean(ddx/(dt**2))
+    except: return np.nan
+ 
+
+def _get_ax(traj):
+    '''
+    return point-wise acceleration
+    '''
+    ddx = np.diff(traj["x_position"], 2)
+    dt = np.diff(traj["timestamp"])[:-1]
+    return ddx/(dt**2)
+    
+    
+def _get_vx(traj):
+    '''
+    return point-wise acceleration
+    '''
+    dy = np.diff(traj["x_position"])
+    dt = np.diff(traj["timestamp"])
+    return np.abs(dy/dt)
 
     
+    
+def _get_residual(traj):
+    try:
+        return traj["x_score"]
+    except: # field is not available
+        return 0
+
+
+def _get_lane_changes(traj, lanes = [i*12 for i in range(-1,12)]):
+    '''
+    count number of times y position is at another lane according to lane marks
+    '''
+    lane_idx = np.digitize(traj["y_position"], lanes)
+    lane_change = np.diff(lane_idx)
+    # count-nonzeros
+    return np.count_nonzero(lane_change)
+
+def doOverlap(pts1, pts2,xpad = 0,ypad = 0):
+    '''
+    pts: [lefttop_x, lefttop_y, bottomright_x, bottomright_y]
+    return True if two rectangles overlap
+    '''
+    # by separating axix theorem
+    if xpad != 0:
+        return not (pts1[0] > xpad + pts2[2] or pts1[1] + ypad < pts2[3] or pts1[2] + xpad < pts2[0] or pts1[3] > pts2[1] + ypad )
+    else:
+        return not (pts1[0] > pts2[2] or pts1[1] < pts2[3] or pts1[2] < pts2[0] or pts1[3] > pts2[1] )
+
+def calc_space_gap(pts1, pts2):
+    '''
+    pts: [lefttop_x, lefttop_y, bottomright_x, bottomright_y]
+    if two cars are on the same lane, get the space gap
+    '''
+    if abs(pts1[1] + pts1[3] - pts2[1] - pts2[3])/2 < 6: # if two cars are likely to be on the same lane
+        return max(pts2[0] - pts1[2], pts1[0] - pts2[2])
+    else:
+        return None
+  
+def _get_min_spacing(time_doc, lanes = [i*12 for i in range(-1,12)]):
+    '''
+    get the minimum x-difference at all lanes for a given timestamp
+    TODO: consider vehicle dimension for space gap
+    '''
+    # get the lane assignments
+    veh_ids = np.array(time_doc['id'])
+    x_pos = np.array([pos[0] for pos in time_doc["position"]])
+    y_pos = np.array([pos[1] for pos in time_doc["position"]])
+    lane_asg = np.digitize(y_pos, lanes) # lane_id < 6: east
+
+    # for each lane, sort by x - This is not the best way to calculate!
+    lane_dict = defaultdict(list) # key: lane_id, val: x_pos
+    for lane_id in np.unique(lane_asg):
+        in_lane_idx = np.where(lane_asg==lane_id)[0] # idx of vehs that are in lane_id
+        in_lane_ids = veh_ids[in_lane_idx]
+        in_lane_xs = x_pos[in_lane_idx]
+        sorted_idx = np.argsort(in_lane_xs)
+        sorted_xs = in_lane_xs[sorted_idx]
+        sorted_ids = in_lane_ids[sorted_idx] # apply the same sequence to ids
+        lane_dict[lane_id] = [sorted_xs, sorted_ids]
+    
+    # get x diff for each lane
+    # pprint.pprint(lane_dict)
+    min_spacing = 10e6
+    for lane_id, vals in lane_dict.items():
+        try:
+            sorted_xs, sorted_ids = vals
+            delta_x = np.diff(sorted_xs)
+            min_idx = np.argmin(delta_x)
+            min_spacing_temp = delta_x[min_idx]
+            if min_spacing_temp < min_spacing:
+                min_spacing = min_spacing_temp
+                min_pair = (sorted_ids[min_idx], sorted_ids[min_idx+1])
+                
+        except ValueError:
+            pass
+        
+    return min_spacing 
+
+    
+
+
+
 class UnsupervisedEvaluator():
     
     def __init__(self, config, collection_name=None, num_threads=100):
@@ -52,7 +226,7 @@ class UnsupervisedEvaluator():
         collection1 : str
             Collection name.
         '''
-        print(config)
+        # print(config)
         self.collection_name = collection_name
         
         client = DBClient(**config)
@@ -60,7 +234,7 @@ class UnsupervisedEvaluator():
         db_raw = client.client["trajectories"]
         db_rec = client.client["reconciled"]
         
-        #print("N collections before transformation: {} {} {}".format(len(db_raw.list_collection_names()),len(db_rec.list_collection_names()),len(db_time.list_collection_names())))
+        # print("N collections before transformation: {} {} {}".format(len(db_raw.list_collection_names()),len(db_rec.list_collection_names()),len(db_time.list_collection_names())))
         # start transform trajectory-indexed collection to time-indexed collection if not already exist
         # this will create a new collection in the "transformed" database with the same collection name as in "trajectory" database
         if collection_name not in db_time.list_collection_names(): # always overwrite
@@ -68,9 +242,9 @@ class UnsupervisedEvaluator():
             client.transform(read_database_name=config["database_name"], 
                       read_collection_name=collection_name)
            
-        #print("N collections after transformation: {} {} {}".format(len(db_raw.list_collection_names()),len(db_rec.list_collection_names()),len(db_time.list_collection_names())))
+        # print("N collections after transformation: {} {} {}".format(len(db_raw.list_collection_names()),len(db_rec.list_collection_names()),len(db_time.list_collection_names())))
         
-        print(config,collection_name)
+        # print(config,collection_name)
         self.dbr_v = DBClient(**config, collection_name = collection_name)
         self.dbr_t = DBClient(host=config["host"], port=config["port"], username=config["username"], password=config["password"],
                               database_name = "transformed", collection_name = collection_name)
@@ -81,8 +255,6 @@ class UnsupervisedEvaluator():
         self.res["collection"] = self.collection_name
         self.res["traj_count"] = self.dbr_v.count()
         self.res["timestamp_count"] = self.dbr_t.count()
-        
-        self.lanes = [i*12 for i in range(-1,12)]
             
        
     def __del__(self):
@@ -112,107 +284,24 @@ class UnsupervisedEvaluator():
         '''
         Results aggregated by evaluating each trajectories
         '''
-        # local functions
-        def _get_duration(traj):
-            return traj["last_timestamp"] - traj["first_timestamp"]
-        
-        def _get_x_traveled(traj):
-            x = abs(traj["ending_x"] - traj["starting_x"])
-            return x
-        
-        def _get_y_traveled(traj):
-            return max(traj["y_position"]) - min(traj["y_position"])
-        
-        def _get_max_vx(traj):
-            dx = np.diff(traj["x_position"]) * traj["direction"]
-            dt = np.diff(traj["timestamp"])
-            try: return max(dx/dt)
-            except: return np.nan
-        
-        def _get_min_vx(traj):
-            dx = np.diff(traj["x_position"]) * traj["direction"]
-            dt = np.diff(traj["timestamp"])
-            try: return min(dx/dt)
-            except: return np.nan
-        
-        def _get_backward_cars(traj):
-            dx = np.diff(traj["x_position"]) * traj["direction"]
-            if np.any(dx < 0):
-                return str(traj['_id'])
-            return None
-        
-        def _get_max_vy(traj):
-            dy = np.diff(traj["y_position"])
-            dt = np.diff(traj["timestamp"])
-            try: return max(dy/dt)
-            except: return np.nan
-        
-        def _get_min_vy(traj):
-            dy = np.diff(traj["y_position"])
-            dt = np.diff(traj["timestamp"])
-            try: return min(dy/dt)
-            except: return np.nan
-            
-        def _get_avg_vx(traj):
-            dx = np.diff(traj["x_position"])
-            dt = np.diff(traj["timestamp"])
-            try: return np.abs(np.average(dx/dt))
-            except: return np.nan
-        
-        def _get_avg_vy(traj):
-            dy = np.diff(traj["y_position"])
-            dt = np.diff(traj["timestamp"])
-            try: return np.average(dy/dt)
-            except: return np.nan
-            
-        def _get_avg_ax(traj):
-            ddx = np.diff(traj["x_position"], 2)
-            dt = np.diff(traj["timestamp"])[:-1]
-            try: return np.mean(ddx/(dt**2))
-            except: return np.nan
-        
-        def _get_min_ax(traj):
-            ddx = np.diff(traj["x_position"], 2)
-            dt = np.diff(traj["timestamp"])[:-1]
-            try: return min(ddx/(dt**2))
-            except: return np.nan
-        
-        def _get_max_ax(traj):
-            ddx = np.diff(traj["x_position"], 2)
-            dt = np.diff(traj["timestamp"])[:-1]
-            try: return max(ddx/(dt**2))
-            except: return np.nan
-            
-        def _get_avg_ax(traj):
-            ddx = np.diff(traj["x_position"], 2)
-            dt = np.diff(traj["timestamp"])[:-1]
-            try: return np.mean(ddx/(dt**2))
-            except: return np.nan
-            
-        def _get_lane_changes(traj):
-            '''
-            count number of times y position is at another lane according to lane marks
-            '''
-            lane_idx = np.digitize(traj["y_position"], self.lanes)
-            lane_change = np.diff(lane_idx)
-            # count-nonzeros
-            return np.count_nonzero(lane_change)
-        
 
         # distributions - all the functions that return a single value
         # TODO: put all functions in a separate script
         functions = [_get_duration, _get_x_traveled,
                       _get_y_traveled, _get_max_vx, _get_min_vx,
-                      _get_max_vy, _get_min_vy,_get_max_ax,_get_min_ax,_get_avg_vx,_get_avg_vy,_get_avg_ax,
+                      _get_max_vy, _get_min_vy,_get_max_ax,_get_min_ax,_get_avg_vx,_get_avg_vy,_get_avg_ax,_get_residual,
+                      _get_vx, _get_ax,
                       _get_lane_changes]
         # functions = [_get_lane_changes]
         
         for fcn in functions:
             traj_cursor = self.dbr_v.collection.find({})
             res = self.thread_pool(fcn, iterable=traj_cursor) # cursor cannot be reused
-            
             attr_name = fcn.__name__[5:]
             print(f"Evaluating {attr_name}...")
+            if attr_name in ["vx", "ax"]:
+                res = [item for sublist in res for item in sublist] # flatten the nested list
+                
             self.res[attr_name]["min"] = np.nanmin(res).item()
             self.res[attr_name]["max"] = np.nanmax(res).item()
             self.res[attr_name]["median"] = np.nanmedian(res).item()
@@ -230,7 +319,6 @@ class UnsupervisedEvaluator():
             print(f"Evaluating {attr_name}...")
             self.res[attr_name] = [r for r in res if r]
             
-
         return 
         
     
@@ -245,69 +333,6 @@ class UnsupervisedEvaluator():
         east_m = np.array([[1, 0,0,0], [0,1,0,0.5], [1,0,1,0], [0,1,0,-0.5]]).T
         west_m = np.array([[1,0,-1,0], [0,1,0,0.5], [1, 0,0,0], [0,1,0,-0.5]]).T
         
-        def doOverlap(pts1, pts2,xpad = 0,ypad = 0):
-            '''
-            pts: [lefttop_x, lefttop_y, bottomright_x, bottomright_y]
-            return True if two rectangles overlap
-            '''
-            # by separating axix theorem
-            if xpad != 0:
-                return not (pts1[0] > xpad + pts2[2] or pts1[1] + ypad < pts2[3] or pts1[2] + xpad < pts2[0] or pts1[3] > pts2[1] + ypad )
-            else:
-                return not (pts1[0] > pts2[2] or pts1[1] < pts2[3] or pts1[2] < pts2[0] or pts1[3] > pts2[1] )
-
-        def calc_space_gap(pts1, pts2):
-            '''
-            pts: [lefttop_x, lefttop_y, bottomright_x, bottomright_y]
-            if two cars are on the same lane, get the space gap
-            '''
-            if abs(pts1[1] + pts1[3] - pts2[1] - pts2[3])/2 < 6: # if two cars are likely to be on the same lane
-                return max(pts2[0] - pts1[2], pts1[0] - pts2[2])
-            else:
-                return None
-          
-        def _get_min_spacing(time_doc):
-            '''
-            get the minimum x-difference at all lanes for a given timestamp
-            TODO: consider vehicle dimension for space gap
-            '''
-            # get the lane assignments
-            veh_ids = np.array(time_doc['id'])
-            x_pos = np.array([pos[0] for pos in time_doc["position"]])
-            y_pos = np.array([pos[1] for pos in time_doc["position"]])
-            lane_asg = np.digitize(y_pos, self.lanes) # lane_id < 6: east
-
-            # for each lane, sort by x - This is not the best way to calculate!
-            lane_dict = defaultdict(list) # key: lane_id, val: x_pos
-            for lane_id in np.unique(lane_asg):
-                in_lane_idx = np.where(lane_asg==lane_id)[0] # idx of vehs that are in lane_id
-                in_lane_ids = veh_ids[in_lane_idx]
-                in_lane_xs = x_pos[in_lane_idx]
-                sorted_idx = np.argsort(in_lane_xs)
-                sorted_xs = in_lane_xs[sorted_idx]
-                sorted_ids = in_lane_ids[sorted_idx] # apply the same sequence to ids
-                lane_dict[lane_id] = [sorted_xs, sorted_ids]
-            
-            # get x diff for each lane
-            # pprint.pprint(lane_dict)
-            min_spacing = 10e6
-            for lane_id, vals in lane_dict.items():
-                try:
-                    sorted_xs, sorted_ids = vals
-                    delta_x = np.diff(sorted_xs)
-                    min_idx = np.argmin(delta_x)
-                    min_spacing_temp = delta_x[min_idx]
-                    if min_spacing_temp < min_spacing:
-                        min_spacing = min_spacing_temp
-                        min_pair = (sorted_ids[min_idx], sorted_ids[min_idx+1])
-                        
-                except ValueError:
-                    pass
-                
-            return min_spacing
-                
-            
-            
             
         def _get_overlaps(time_doc):
             '''
@@ -401,7 +426,6 @@ class UnsupervisedEvaluator():
                             overlaps.add(pair)
                     count += 1
                 
-                # dummy = [overlaps.add(rr) for r in res for rr in r]
                 self.res[attr_name] = list(overlaps)
             else:
                 res = self.thread_pool(fcn, iterable=time_cursor) 
@@ -411,10 +435,8 @@ class UnsupervisedEvaluator():
                 self.res[attr_name]["avg"] = np.nanmean(res).item()
                 self.res[attr_name]["stdev"] = np.nanstd(res).item()
                 self.res[attr_name]["raw"] = res
-
         return
     
-
         
     def print_res(self):
         pprint.pprint(self.res, width = 1)
@@ -434,6 +456,14 @@ class UnsupervisedEvaluator():
             json.dump(self.res, f, indent=4, sort_keys=False,cls=NpEncoder)
         print("saved.")
  
+    
+def plot_histogram(data, title=""):
+    bins = min(int(len(data)/10), 100)
+    plt.figure()
+    plt.hist(data, bins=bins)
+    plt.title(title)
+    plt.show()
+    
 def call(db_param,collection):    
     ue = UnsupervisedEvaluator(db_param, collection_name=collection, num_threads=200)
     t1 = time.time()
@@ -453,7 +483,8 @@ if __name__ == '__main__':
     # with open('config.json') as f:
     #     config = json.load(f)
       
-    collection = "transcendent_snek--RAW_GT1__lionizes"
+    collection = "pristine_stork--RAW_GT1__mumbles"
+    # collection = "morose_panda--RAW_GT1__juxtaposes"
     if "__" in collection:
         database_name = "reconciled"
     else:
@@ -466,6 +497,24 @@ if __name__ == '__main__':
       "password": "mongodb@i24",
       "database_name": database_name # db that the collection to evaluate is in
     }
+    try:
+        with open(f"res_{collection}.json", "rb") as f:
+            res = json.load(f)
+            print("loaded res from local json file")
+    except:
+        res = call(param, collection)
+        
+    # %% plot 
+    plot_histogram(res["vx"]["raw"], "vx")
     
-    res = call(param, collection)
+    # %% examine large accelerations
+    # dbc = DBClient(**param, collection_name = collection)
+    # col = dbc.collection 
+    # for doc in col.find():
+    #     r = _get_avg_ax(doc)
+    #     if r and r < -50:
+    #         print(doc["_id"])
+            
+    
+    
     
