@@ -690,6 +690,7 @@ def chart_unsup(results,figsize):
         data[qidx,-1] = MD[quant]["best"]
     
     # normalize data by max data[:,0]
+    data += 0.0000001
     data_norm = data / np.max(data[:,:2],axis = 1)[:,None]
     data_norm = data_norm.clip(0.001)
     
@@ -866,7 +867,7 @@ def iou_scatter(results,figsize):
     fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
     ax = fig.add_subplot(111)
     
-    ridx =1
+    ridx =0
     x_val = results[ridx]["match_overlap"]["conf"]
     y_val = results[ridx]["match_overlap"]["iou"]
     # plot_windows = np.arange(0,1,0.025)
@@ -1188,7 +1189,7 @@ def gen_pane(results = [],
     cv2.imwrite(f_name,dashboard)
     
     #snow = now.strftime("%Y-%m-%d_%H-%M-%S")
-    url = 'http://10.2.219.208:5991/upload'
+    url = 'http://10.2.219.208:5991/upload?type=test'
     files = {'upload_file': open(f_name,'rb')}
     ret = requests.post(url, files=files)
     print(ret)
@@ -1218,7 +1219,7 @@ def agg_score(result):
     spider["Realtime"]             = result["bps"] / 30
     spider["X Error"]           = max(0, 1 - result["MAE_x"] / 5.0  )
     spider["% to Extents"]      = (  result["cause_of_death"]["Exit FOV"] + result["cause_of_death"]["Active at End"] )    /result["n_pred"]
-    spider["Trajectory Length"] = result["x_traveled_avg"] /  (sum(result["gt_x_traveled"])/len(result["gt_x_traveled"]))
+    spider["Trajectory Length"] = min(1,result["x_traveled_avg"] /  (sum(result["gt_x_traveled"])/len(result["gt_x_traveled"])))
     spider["Avg Acceleration"]  = max(0, 1 - np.mean(np.abs(result["avg_ax_raw"])) / (5))
     spider["Classification"]    = torch.sum(torch.diag(result["confusion_matrix"])) /torch.sum(result["confusion_matrix"])
     spider["Avg GT cover"]      = sum(result["per_gt_recall"])/len(result["per_gt_recall"])
@@ -1312,11 +1313,14 @@ def main(mode = "latest v latest", close = 0):
         results = [
             #"/home/derek/Documents/i24/trajectory-eval-toolkit/eval_results/morose_panda--RAW_GT1_castigates.cpkl",
             #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/jubilant_stork--RAW_GT1__initiates.cpkl",
-            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/demure_wallaby--RAW_GT1__negotiates.cpkl",
+            #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/hollistic_stork--RAW_GT1__castigates.cpkl",
+            #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/trivial_triceratops--RAW_GT1__castigates.cpkl",
             #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/trivial_axylotl--RAW_GT1__harasses.cpkl",
-            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/sympathetic_osprey--RAW_GT1__juxtaposes.cpkl",
-            #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/pristine_stork--RAW_GT1__negotiates.cpkl",
-            #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/pristine_stork--RAW_GT1__cajoles.cpkl",
+            #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/sympathetic_osprey--RAW_GT1__juxtaposes.cpkl",
+            #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/ostentatious_hippo--RAW_GT1__harasses.cpkl",
+            #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/pristine_stork--RAW_GT1__smacks.cpkl",
+            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/sanctimonious_beluga--RAW_GT1__administers.cpkl",
+            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/sympathetic_cnidarian--RAW_GT1__juxtaposes.cpkl"
             ]
     #results.reverse()
     
@@ -1357,5 +1361,6 @@ def main(mode = "latest v latest", close = 0):
     
     
 if __name__ == "__main__":
+    #main(mode = "best v best")
     main(mode = "manual")
    

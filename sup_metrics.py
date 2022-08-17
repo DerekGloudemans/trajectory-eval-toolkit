@@ -356,6 +356,7 @@ def evaluate(db_param,
                     gt_pos = np.array([pos["x"],pos["y"],gt_dict[gt_id]["length"],gt_dict[gt_id]["width"],gt_dict[gt_id]["height"]])
                     break
             state_err = pred_pos - gt_pos
+            state_err[0] *= gt_dict[gt_id]["direction"]
             state_errors.append(state_err)
             
             gt_cls = gt_dict[gt_id]["coarse_vehicle_class"]
@@ -396,7 +397,7 @@ def evaluate(db_param,
     total_pred = len(pred_dict)
     
     RESULT["x_variation"] = diffx/travelled
-    RESULT["y_variation"] = diffy
+    RESULT["y_variation"] = diffy/total_pred
     
     
     # Roadway extents
