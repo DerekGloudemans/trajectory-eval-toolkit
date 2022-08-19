@@ -1319,8 +1319,9 @@ def main(mode = "latest v latest", close = 0):
             #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/sympathetic_osprey--RAW_GT1__juxtaposes.cpkl",
             #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/ostentatious_hippo--RAW_GT1__harasses.cpkl",
             #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/pristine_stork--RAW_GT1__smacks.cpkl",
+            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/introspective_falcon--RAW_GT1.cpkl",
             "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/sanctimonious_beluga--RAW_GT1__administers.cpkl",
-            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/sympathetic_cnidarian--RAW_GT1__juxtaposes.cpkl"
+            #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/sympathetic_cnidarian--RAW_GT1__juxtaposes.cpkl"
             ]
     #results.reverse()
     

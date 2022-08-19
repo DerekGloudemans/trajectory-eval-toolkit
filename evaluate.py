@@ -1,6 +1,6 @@
 
 from sup_metrics     import evaluate
-from unsup_statistics2   import call
+from unsup_statistics  import call
 
 from i24_database_api import DBClient
 
@@ -251,7 +251,8 @@ def main():
     
     
     dash(mode = "latest v latest",close = 1000)
+    return result
     
 if __name__ == "__main__":
-    main()
+    result = main()
         
