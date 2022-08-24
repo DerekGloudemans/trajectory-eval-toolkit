@@ -14,100 +14,7 @@ warnings.filterwarnings("ignore")
 
 from eval_dashboard import main as dash
 
-def db_cleanup():
-    db_param = {
-          #"default_host": "10.2.218.56",
-          #"default_port": 27017,
-          "host":"10.2.218.56",
-          "port":27017,
-          "username":"i24-data",
-          "password":"mongodb@i24",
-          #"default_username": "i24-data",
-          #"readonly_user":"i24-data",
-          #"default_password": "mongodb@i24",
-          "database_name": "trajectories",      
-          "server_id": 1,
-          "session_config_id": 1,
-          #"trajectory_database":"trajectories",
-          #"timestamp_database":"transformed"
-          }
 
-    # connect to database
-    dbw   = DBClient(**db_param)
-    existing_collections = dbw.list_collection_names() # list all collections
-    existing_collections.sort()
-    print("\n Existing Collections in database -  {}:".format(dbw.database_name)) 
-    [print(item) for item in existing_collections]
-    print("\n")
-    
-    
-    while True:
-        existing_collections = dbw.db.list_collection_names() # list all collections
-        existing_collections.sort()
-        print("\n Existing Collections: ")
-        [print(item) for item in existing_collections]
-        print("\n")
-    
-        inp = input("Type collection name to delete or QUIT to exit: ")
-        if inp == "QUIT":
-            break
-        else:
-            if inp in existing_collections:
-                dbw.delete_collections([inp])
-
-# adj_list = ["admissible",
-#             "ostentatious",
-#             "modest",
-#             "loquacious",
-#             "gregarious",
-#             "cantankerous",
-#             "bionic",
-#             "demure",
-#             "thrifty",
-#             "quizzical",
-#             "pragmatic",
-#             "sibilant",
-#             "visionary",
-#             "morose",
-#             "jubilant",
-#             "apathetic",
-#             "stalwart",
-#             "paradoxical",
-#             "tantalizing",
-#             "specious",
-#             "tautological",
-#             "hollistic",
-#             "super",
-#             "pristine",
-#             "wobbly",
-#             "lovely"]
-
-# noun_list = ["anteater",
-#              "zebra",
-#              "anaconda",
-#              "aardvark",
-#              "bison",
-#              "wallaby",
-#              "heron",
-#              "stork",
-#              "cyborg",
-#              "vulcan",
-#              "snek",
-#              "beluga",
-#              "panda",
-#              "lynx",
-#              "panther",
-#              "housecat",
-#              "osprey",
-#              "bovine",
-#              "jackalope",
-#              "yeti",
-#              "doggo",
-#              "cheetah",
-#              "squirrel",
-#              "axylotl",
-#              "kangaroo"
-#              ]
 
 
 def get_pickle(name):
@@ -116,34 +23,40 @@ def get_pickle(name):
         return result
 
 
+def manage_collections(db_name = "trajectories"):
+    db_param2 = {
+          "host":"10.80.4.91",
+          "port":27017,
+          "username": "mongo-admin",
+          "password": "i24-data-access",
+          "database": db_name      
+          }
+    mcm = MongoCollectionManager(**db_param2)
     
-def main():
+    mcm.list_saved_collections()
+    mcm.cleanup()
+
+def save_collection_and_reconciled_descendants(collection_name):
+    pass
+    
+def main(gt_coll = "groundtruth_scene_2_57", TAG = "GT2"):
     pc  = None
     sc = None
     for db_name in ["trajectories","reconciled"]:
         to_remove = []
 
         db_param = {
-              #"default_host": "10.2.218.56",
-              #"default_port": 27017,
-              "host":"10.2.218.56",
+              "host":"10.80.4.91",
               "port":27017,
-              "username":"i24-data",
-              "password":"mongodb@i24",
-              #"default_username": "i24-data",
-              #"readonly_user":"i24-data",
-              #"default_password": "mongodb@i24",
+              "username": "mongo-admin",
+              "password": "i24-data-access",
               "database_name": db_name,      
               "server_id": 1,
               "session_config_id": 1,
-              #"trajectory_database":"trajectories",
-              #"timestamp_database":"transformed"
               }
-    
-
-        #gt_coll = "groundtruth_scene_1"
-        gt_coll = "groundtruth_scene_1_130"
-        #gt_coll = None
+        
+        
+                
         IOUT = 0.3
         collection_cleanup = False
         #coll_name = "paradoxical_wallaby--RAW_GT1__boggles"     ; append_db = False
@@ -151,8 +64,6 @@ def main():
         
         append_db = False
         if db_name == "trajectories": append_db  = True
-        
-        TAG = "GT1"
     
     
         # connect to database
@@ -254,5 +165,6 @@ def main():
     return result
     
 if __name__ == "__main__":
-    result = main()
-        
+    #result = main()
+    manage_collections() 
+    

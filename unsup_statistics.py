@@ -27,7 +27,6 @@ TODO
 """
 
 from i24_database_api import DBClient
-
 import matplotlib.pyplot as plt
 from bson.objectid import ObjectId
 import pprint
@@ -38,7 +37,7 @@ from multiprocessing.pool import ThreadPool
 import time
 import torch
 
-# local functions
+# =================== CALCULATE DYNAMICS ====================    
 def _get_duration(traj):
     return traj["last_timestamp"] - traj["first_timestamp"]
 
@@ -46,20 +45,21 @@ def _get_x_traveled(traj):
     x = abs(traj["ending_x"] - traj["starting_x"])
     return x
 
+    
 def _get_y_traveled(traj):
     return max(traj["y_position"]) - min(traj["y_position"])
 
-def _get_max_vx(traj):
-    dx = np.diff(traj["x_position"]) * traj["direction"]
-    dt = np.diff(traj["timestamp"])
-    try: return max(dx/dt)
-    except: return np.nan
+# def _get_max_vx(traj):
+#     dx = np.diff(traj["x_position"]) * traj["direction"]
+#     dt = np.diff(traj["timestamp"])
+#     try: return max(dx/dt)
+#     except: return np.nan
 
-def _get_min_vx(traj):
-    dx = np.diff(traj["x_position"]) * traj["direction"]
-    dt = np.diff(traj["timestamp"])
-    try: return min(dx/dt)
-    except: return np.nan
+# def _get_min_vx(traj):
+#     dx = np.diff(traj["x_position"]) * traj["direction"]
+#     dt = np.diff(traj["timestamp"])
+#     try: return min(dx/dt)
+#     except: return np.nan
 
 def _get_backward_cars(traj):
     dx = np.diff(traj["x_position"]) * traj["direction"]
@@ -67,11 +67,11 @@ def _get_backward_cars(traj):
         return str(traj['_id'])
     return None
 
-def _get_max_vy(traj):
-    dy = np.diff(traj["y_position"])
-    dt = np.diff(traj["timestamp"])
-    try: return max(dy/dt)
-    except: return np.nan
+# def _get_max_vy(traj):
+#     dy = np.diff(traj["y_position"])
+#     dt = np.diff(traj["timestamp"])
+#     try: return max(dy/dt)
+#     except: return np.nan
 
 def _get_min_vy(traj):
     dy = np.diff(traj["y_position"])
@@ -85,11 +85,11 @@ def _get_avg_vx(traj):
     try: return np.abs(np.average(dx/dt))
     except: return np.nan
 
-def _get_avg_vy(traj):
-    dy = np.diff(traj["y_position"])
-    dt = np.diff(traj["timestamp"])
-    try: return np.average(dy/dt)
-    except: return np.nan
+# def _get_avg_vy(traj):
+#     dy = np.diff(traj["y_position"])
+#     dt = np.diff(traj["timestamp"])
+#     try: return np.average(dy/dt)
+#     except: return np.nan
     
 def _get_avg_ax(traj):
     ddx = np.diff(traj["x_position"], 2)
@@ -97,23 +97,18 @@ def _get_avg_ax(traj):
     try: return np.mean(ddx/(dt**2))
     except: return np.nan
 
-def _get_min_ax(traj):
-    ddx = np.diff(traj["x_position"], 2)
-    dt = np.diff(traj["timestamp"])[:-1]
-    try: return min(ddx/(dt**2))
-    except: return np.nan
+# def _get_min_ax(traj):
+#     ddx = np.diff(traj["x_position"], 2)
+#     dt = np.diff(traj["timestamp"])[:-1]
+#     try: return min(ddx/(dt**2))
+#     except: return np.nan
 
-def _get_max_ax(traj):
-    ddx = np.diff(traj["x_position"], 2)
-    dt = np.diff(traj["timestamp"])[:-1]
-    try: return max(ddx/(dt**2))
-    except: return np.nan
+# def _get_max_ax(traj):
+#     ddx = np.diff(traj["x_position"], 2)
+#     dt = np.diff(traj["timestamp"])[:-1]
+#     try: return max(ddx/(dt**2))
+#     except: return np.nan
     
-def _get_avg_ax(traj):
-    ddx = np.diff(traj["x_position"], 2)
-    dt = np.diff(traj["timestamp"])[:-1]
-    try: return np.mean(ddx/(dt**2))
-    except: return np.nan
  
 
 def _get_ax(traj):
@@ -127,19 +122,28 @@ def _get_ax(traj):
     
 def _get_vx(traj):
     '''
-    return point-wise acceleration
+    return point-wise x-velocity
     '''
-    dy = np.diff(traj["x_position"])
+    dx = np.diff(traj["x_position"])
     dt = np.diff(traj["timestamp"])
-    return np.abs(dy/dt)
+    return np.abs(dx/dt)
 
+def _get_vy(traj):
+    '''
+    return point-wise y-velocity
+    '''
+    dy = np.diff(traj["y_position"])
+    dt = np.diff(traj["timestamp"])
+    return dy/dt
     
-    
-def _get_residual(traj):
-    try:
-        return traj["x_score"]
-    except: # field is not available
-        return 0
+def _get_rotation(traj):
+    '''
+    return point-wise vehicle rotation (degree) relative to the direction
+    '''
+    vx = np.abs(_get_vx(traj)) # non-negative
+    vy = np.abs(_get_vy(traj)) # non-negative
+    theta = np.arctan2(vy, vx)*(180/3.14)
+    return theta
 
 
 def _get_lane_changes(traj, lanes = [i*12 for i in range(-1,12)]):
@@ -152,21 +156,79 @@ def _get_lane_changes(traj, lanes = [i*12 for i in range(-1,12)]):
     return np.count_nonzero(lane_change)
 
 
-def _get_post_flags(traj, flag_dict):
+
+
+
+# =================== GET OTHER INFO ====================    
+def _calc_feasibility(traj, start_time, end_time, buffer=1, xmin=0, xmax=2000):
     '''
-    flag_dict is a shared dictionary amongst threads
-    key: "flag_name", val: num_of_occurances
+    for each of the following, assign traj a score between 0-1. 1 is good, 0 is bad
+    distance: % x covered
+        start_time, end_time are time boundaries. buffer time is the tolerance for which traj
+        starts buffer after start_time or ends buffer before end_time are tolerated
+    backwards: % time where dx/dt is negative
+    rotation: % of time where theta is > 30degree
+    acceleration: % of time where abs(accel) > 10ft/s2
+    conflicts: % of time traj conflicts with others
     '''
+    # x distance traveled
+    end = end_time if traj["last_timestamp"] >= end_time-buffer else traj["last_timestamp"]  
+    if traj['direction'] == 1:
+        start = xmin if traj["first_timestamp"] <= start_time + buffer else traj["starting_x"]
+        end = xmax if traj["last_timestamp"] >= end_time - buffer else traj["ending_x"]
+    else:
+        # xmax, xmin = xmin, xmax
+        start = xmax if traj["first_timestamp"] <= start_time + buffer else traj["starting_x"]
+        end = xmin if traj["last_timestamp"] >= end_time - buffer else traj["ending_x"]
+    dist = min(1, abs(end-start)/(xmax-xmin))
+    
+    # backward occurances
+    dx = np.diff(traj["x_position"]) * traj["direction"]
+    backward = 1-np.sum(np.array(dx) < 0)/len(dx)
+    
+    # rotation
+    theta = np.abs(_get_rotation(traj))
+    rotation = 1-np.sum(np.array(theta) >= 30)/len(theta)
+    
+    # acceleration
+    accel = np.abs(_get_ax(traj))
+    acceleration = 1-np.sum(np.array(accel) > 10)/len(accel)
+    
+    # conflicts - get the max occurances now
+    duration = _get_duration(traj)
     try:
-        for flag in traj["post_flag"]:
-            flag_dict[flag] += 1
-    except KeyError: # no post_flag
-        pass
+        time_conflict = max([item[1] for item in traj["conflicts"]])
+    except KeyError:
+        time_conflict = 0
+    conflict = 1-time_conflict/duration
+    
+    return [dist, backward, rotation, acceleration, conflict]
     
     
     
     
+def _get_residual(traj):
+    try:
+        return traj["x_score"]
+    except: # field is not available
+        return 0
+
+
+# def _get_post_flags(traj, flag_dict):
+#     '''
+#     flag_dict is a shared dictionary amongst threads
+#     key: "flag_name", val: num_of_occurances
+#     '''
+#     try:
+#         for flag in traj["post_flag"]:
+#             flag_dict[flag] += 1
+#     except KeyError: # no post_flag
+#         pass
     
+
+    
+# =================== TIME-INDEXED CALCULATIONS ==================== 
+       
 def doOverlap(pts1, pts2,xpad = 0,ypad = 0):
     '''
     pts: [lefttop_x, lefttop_y, bottomright_x, bottomright_y]
@@ -228,9 +290,57 @@ def _get_min_spacing(time_doc, lanes = [i*12 for i in range(-1,12)]):
         
     return min_spacing 
 
+def _get_distance_score(traj):
+    return traj["feasibility"]["distance"]
+def _get_backward_score(traj):
+    return traj["feasibility"]["backward"]
+def _get_acceleration_score(traj):
+    return traj["feasibility"]["acceleration"]
+def _get_rotation_score(traj):
+    return traj["feasibility"]["rotation"]
+def _get_conflict_score(traj):
+    return traj["feasibility"]["conflict"]
+
+def _get_all_feasible(traj):
+    '''
+    if all the scores are 1
+    '''
+    feas = []
+    for key,val in traj["feasibility"].items():
+        if key=="distance":
+            val = val if val < 0.8 else 1 # tolerate >80% distance score
+        feas.append(val)
+        
+    if all(np.array(feas)==1):
+        return traj["_id"]
+    else:
+        return None
     
-
-
+def _get_any_infeasible(traj):
+    '''
+    if any of the scores is not one
+    '''
+    feas = []
+    for key,val in traj["feasibility"].items():
+        if key=="distance":
+            val = val if val < 0.8 else 1 # tolerate >80% distance score
+        feas.append(val)
+            
+    if any(np.array(feas)!=1):
+        return traj["_id"]
+    else:
+        return None
+    
+def _get_feasibility_score(traj):
+    '''
+    score = sumprod(all_scores)
+    '''
+    score = 1
+    for key,val in traj["feasibility"].items():
+        score *= val
+    return score
+    
+    
 
 class UnsupervisedEvaluator():
     
@@ -308,9 +418,10 @@ class UnsupervisedEvaluator():
         # distributions - all the functions that return a single value
         # TODO: put all functions in a separate script
         functions_hist = [_get_duration, _get_x_traveled,
-                      _get_y_traveled, _get_max_vx, _get_min_vx,
-                      _get_max_vy, _get_min_vy,_get_max_ax,_get_min_ax,_get_avg_vx,_get_avg_vy,_get_avg_ax,_get_residual,
-                      _get_vx, _get_ax, _get_lane_changes]
+                      _get_avg_vx,_get_avg_ax,_get_residual,
+                      _get_vx, _get_ax, _get_lane_changes,
+                      _get_distance_score, _get_backward_score, _get_acceleration_score, _get_rotation_score, _get_conflict_score,_get_feasibility_score
+                      ]
         
         for fcn in functions_hist:
             traj_cursor = self.dbr_v.collection.find({})
@@ -329,7 +440,7 @@ class UnsupervisedEvaluator():
             self.res[attr_name]["raw"] = res
             
         # get ids - all the functions that return ids if a condition is met
-        functions_ids = [_get_backward_cars]
+        functions_ids = [_get_backward_cars, _get_all_feasible, _get_any_infeasible]
         for fcn in functions_ids:
             attr_name = fcn.__name__[5:]
             print(f"Evaluating {attr_name}...")
@@ -338,14 +449,14 @@ class UnsupervisedEvaluator():
             self.res[attr_name] = [r for r in res if r]
             
         # get flags - all functions that write to a shared variable
-        functions_flags = [_get_post_flags]
-        for fcn in functions_flags:
-            attr_name = fcn.__name__[5:]
-            print(f"Evaluating {attr_name}...")
-            self.flag_dict = defaultdict(int)
-            traj_cursor = self.dbr_v.collection.find({})
-            res = self.thread_pool(fcn, iterable=traj_cursor, kwargs={"flag_dict": self.flag_dict}) 
-            self.res[attr_name] = self.flag_dict
+        # functions_flags = [_get_post_flags]
+        # for fcn in functions_flags:
+        #     attr_name = fcn.__name__[5:]
+        #     print(f"Evaluating {attr_name}...")
+        #     self.flag_dict = defaultdict(int)
+        #     traj_cursor = self.dbr_v.collection.find({})
+        #     res = self.thread_pool(fcn, iterable=traj_cursor, kwargs={"flag_dict": self.flag_dict}) 
+        #     self.res[attr_name] = self.flag_dict
         
         # pprint.pprint(self.res["post_flags"])
         return 
@@ -455,20 +566,20 @@ class UnsupervisedEvaluator():
                 # pprint.pprint(overlaps, width = 1)
                 self.res[attr_name] = overlaps
 
-                id2idx = {}
-                cntr = 0
-                for i, pair in enumerate(overlaps):
-                    for j, _id in enumerate(pair):
-                        if _id not in id2idx:
-                            id2idx[_id] = cntr
-                            cntr+=1
+                # id2idx = {}
+                # cntr = 0
+                # for i, pair in enumerate(overlaps):
+                #     for j, _id in enumerate(pair):
+                #         if _id not in id2idx:
+                #             id2idx[_id] = cntr
+                #             cntr+=1
                 
-                overlaps_m = torch.zeros([cntr, cntr])
-                for pair, val in overlaps.items():
-                    id1, id2 = pair
-                    overlaps_m[id2idx[id1], id2idx[id2]] = val
+                # overlaps_m = torch.zeros([cntr, cntr])
+                # for pair, val in overlaps.items():
+                #     id1, id2 = pair
+                #     overlaps_m[id2idx[id1], id2idx[id2]] = val
                     
-                self.res["overlap_matrix"] = overlaps_m
+                # self.res["overlap_matrix"] = overlaps_m
                     
             else:
                 res = self.thread_pool(fcn, iterable=time_cursor) 
@@ -480,7 +591,7 @@ class UnsupervisedEvaluator():
                 self.res[attr_name]["raw"] = res
         
         # write to database
-        self.write_flag_to_db()
+        self.update_db()
         
         return
     
@@ -504,65 +615,76 @@ class UnsupervisedEvaluator():
         print("saved.")
         
         
-    def write_flag_to_db(self):
+    def update_db(self):
         '''
-        rec: reconciled collection
-        add post_flags for short tracks and overlaps
+        add feasibility information to db
         '''
-        if "__" not in self.collection_name:
-            print("Skip flagging for raw collection")
-            return
+        # if "__" not in self.collection_name:
+        #     print("Skip flagging for raw collection")
+        #     return
         
         col = self.dbr_v.collection
+        start_time = self.dbr_v.get_min("first_timestamp")
+        end_time = self.dbr_v.get_max("last_timestamp")
+        x_min = self.dbr_v.get_min("starting_x")
+        x_max = self.dbr_v.get_max("ending_x")
         
-        # reset post_flags
-        col.update_many({},{"$unset": { "post_flag": "",
-                                       "conflicts": "" } })
+        # reset fields
+        col.update_many({},{"$unset": {"post_flag": "",
+                                       "conflicts": "",
+                                       "feasibility": "",
+                                       } })
         
-        # flag short trajectories (<50% of x_range)
-        x_range = 2000
-        cursor = col.find({})
-        for traj in cursor:
-            x = abs(traj["ending_x"] - traj["starting_x"])
-            if x < 0.5*x_range:
-                col.update_one({"_id": traj["_id"]}, 
-                                {"$push": {"post_flag": "short track"}},
-                                upsert = True)
-        
-        # flag overlaps
+        # update conflicts
         for pair, occurances in self.res["overlaps"].items():
             # {'$push': {'tags': new_tag}}, upsert = True)
             id1, id2 = pair
             col.update_one({"_id": id1}, 
-                            {"$push": {"conflicts": [id2, occurances],
-                                       "post_flag": "conflicts"}},
+                            {"$push": {"conflicts": [id2, occurances]}},
                             upsert = True)
             col.update_one({"_id": id2}, 
                             {"$push": {"conflicts": [id1, occurances],
-                                       "post_flag": "conflicts"}},
+                                       }},
                             upsert = True)
-        print("Updated flags for {}".format(self.collection_name))
+            
+        # update feasibility
+        cursor = col.find({})
+        for traj in cursor:
+            feas = _calc_feasibility(traj, start_time, end_time, xmin=x_min, xmax=x_max)
+            dist, backward, rotation, acceleration, conflict = feas
+            col.update_one({"_id": traj["_id"]}, 
+                            {"$set": {"feasibility.distance": dist,
+                                      "feasibility.backward": backward,
+                                      "feasibility.rotation": rotation,
+                                      "feasibility.acceleration": acceleration,
+                                      "feasibility.conflict": conflict,
+                                       }},
+                            upsert = True)
+            
+        
+        print("Updated feasibility for {}".format(self.collection_name))
 
         
             
  
     
-def plot_histogram(data, title=""):
-    bins = min(int(len(data)/10), 100)
+def plot_histogram(data, title="", ):
+    bins = min(int(len(data)/10), 300)
     plt.figure()
     plt.hist(data, bins=bins)
     plt.title(title)
     plt.show()
     
     
-def call(db_param,collection):    
+def call(db_param,collection): 
+    
     ue = UnsupervisedEvaluator(db_param, collection_name=collection, num_threads=200)
     t1 = time.time()
-    
     ue.time_evaluate(step = 1)
     ue.traj_evaluate()
     t2 = time.time()
     print("time: ", t2-t1)
+    
     #ue.print_res()
     #ue.save_res()
     
@@ -574,14 +696,14 @@ if __name__ == '__main__':
     # with open('config.json') as f:
     #     config = json.load(f)
       
-    collection = "morose_caribou--RAW_GT1__escalates"
+    collection = "sanctimonious_beluga--RAW_GT1__administers"
     # collection = "morose_panda--RAW_GT1__juxtaposes"
     if "__" in collection:
         database_name = "reconciled"
     else:
-        databas_name = "trajectories"
+        database_name = "trajectories"
         
-    param = {
+    db_param = {
       "host": "10.2.218.56",
       "port": 27017,
       "username": "i24-data",
@@ -593,19 +715,19 @@ if __name__ == '__main__':
             res = json.load(f)
             print("loaded res from local json file")
     except:
-        res = call(param, collection)
+        res = call(db_param, collection)
+        # ue = UnsupervisedEvaluator(db_param, collection_name=collection, num_threads=200)
+        # ue.time_evaluate(step = 1)
+        # ue.traj_evaluate()
+        
+        # print("all_feasible: ", len(res["all_feasible"]))
+        # print("any_infeasible: ", len(res["any_infeasible"]))
         
     # %% plot 
-    # plot_histogram(res["vx"]["raw"], "vx")
+    # plot_histogram(ue.res["feasibility_score"]["raw"], "conflict_score")
+    # plot_histogram(ue.res["distance_score"]["raw"], "distance_score")
     
-    # %% examine large accelerations
-    # dbc = DBClient(**param, collection_name = collection)
-    # col = dbc.collection 
-    # for doc in col.find():
-    #     r = _get_avg_ax(doc)
-    #     if r and r < -50:
-    #         print(doc["_id"])
-            
+
     
     
     

@@ -15,6 +15,7 @@ from scipy.stats.kde import gaussian_kde
 from scipy.stats import norm
 import matplotlib.gridspec as grid_spec
 
+
 from sklearn.linear_model import LinearRegression
 
 import colorsys
@@ -96,7 +97,15 @@ MD = {
     "gt_avg_matches":{"text":"Pred IDs / GT","best":1,"bad":2},
     "per_gt_recall":{"text":"Recall / GT","best":1,"bad":0},
     "per_pred_precision":{"text":"Precision / Pred","best":1,"bad":0},
-    "residual_raw":{"text": "Post Residual"}
+    "residual_raw":{"text": "Post Residual"},
+    
+    "distance_score_raw":{"text": "Distance"},
+    "backward_score_raw":{"text": "Backward"},
+    "acceleration_score_raw":{"text": "Acceleration"},
+    "rotation_score_raw":{"text": "Rotation"},
+    "conflict_score_raw":{"text": "Overlapping"},
+    "feasibility_score_raw":{"text": "Feasible"},
+    
     }
 
 global color_pallette 
@@ -460,16 +469,29 @@ def state_error(results,figsize):
     
     fig.text(0.5,0.95,"State Error Histograms",fontsize = 2000/scale,ha = "center")
     return f2a(fig)
-  
-def unsup_hist(results,figsize):
+
+def unsup_hist2(results,figsize):
+    to_plot = ["distance_score_raw","backward_score_raw","acceleration_score_raw","rotation_score_raw","conflict_score_raw","feasibility_score_raw"]
+    units = ["","","","","",""]
+    title = "Unsupervised Score"
     
-    to_plot = ["x_traveled_raw","avg_vx_raw","avg_ax_raw","vx_raw","ax_raw","residual_raw"]
+    xrange_clip = [[0,1],[0,1],[0,1],[0,1],[0,1],[0,1]]
     
+    return unsup_hist(results,figsize,to_plot,units,xrange_clip,title,uniform_x = True)
+
+def unsup_hist(results,
+               figsize,
+               to_plot = ["x_traveled_raw","avg_vx_raw","avg_ax_raw","vx_raw","ax_raw","residual_raw"],
+               units = ["ft","ft/s","ft/$s^2$","ft/s","ft/$s^2$","ft"],
+               xrange_clip = [[-500,2000],[0,150],[-8,8],[0,150],[-8,8],[0,100]],
+               title = "Trajectory Attribute Histograms",
+               uniform_x = False
+               ):
+
     if "residual_raw" not in results[0].keys() or sum(results[0]["residual_raw"]) == 0:
         to_plot = ["x_traveled_raw","avg_vx_raw","avg_ax_raw","vx_raw","ax_raw"]
     
-    units = ["ft","ft/s","ft/$s^2$","ft/s","ft/$s^2$","ft"]
-    xrange_clip = [[-500,2000],[0,150],[-8,8],[0,150],[-8,8],[0,100]]
+    
     fig = plt.figure(figsize =(figsize[0]/scale,figsize[1]/scale))
     # ax = fig.add_subplot(111)
     # ax.spines.top.set_visible(False)
@@ -477,19 +499,24 @@ def unsup_hist(results,figsize):
     # ax.spines.right.set_visible(False)
     
     # get data
-    data = [results[0][key] for key in to_plot]
+    data = [np.array(results[0][key]) for key in to_plot]
+    data = [data[i] -0.01*np.random.rand(*data[i].shape) for i in range(len(data))]
+    
     #data = np.stack(data)
     #xx = np.arange(-8,8,0.05)
     data_pdf = []
     for i in range(len(data)):
+        
         pdf = gaussian_kde(data[i])
         xx = np.arange(np.min(data[i]),np.max(data[i]),1)
         xx = np.linspace(np.min(data[i]),np.max(data[i]),200)
         data_pdf.append([xx,pdf(xx)])
+            
     #data_pdf = np.stack(data_pdf)
     
     if len(results) > 1:
-        data2 = [results[1][key] for key in to_plot]
+        data2 = [np.array(results[1][key]) for key in to_plot]
+        data2 = [data2[i] -0.01*np.random.rand(*data2[i].shape) for i in range(len(data2))]
         #data2 = np.stack(data2)
         data2_pdf = []
         for i in range(len(data2)):
@@ -536,6 +563,10 @@ def unsup_hist(results,figsize):
         # setting uniform x and y lims
         xr[0] = max(xr[0],xrange_clip[didx][0])
         xr[1] = min(xr[1],xrange_clip[didx][1])
+        
+        if uniform_x:
+            xr = xrange_clip[didx]
+        
 
         ax_objs[-1].set_xlim(xr[0],xr[1])
         ax_objs[-1].set_ylim(0,max_val)
@@ -551,7 +582,7 @@ def unsup_hist(results,figsize):
         
         #if didx == data.shape[0]-1:
         ax_objs[-1].tick_params(axis='x', labelsize=1000/scale,length = 500/scale )
-        ax_objs[-1].set_xlabel("Distribution ({})".format(units[didx]), fontsize = 1500/scale)
+        ax_objs[-1].set_xlabel("{}".format(units[didx]), fontsize = 1500/scale)
         # else:
         #     ax_objs[-1].set_xticklabels([])
         #     ax_objs[-1].tick_params(axis='x', length = 200/scale )
@@ -571,10 +602,10 @@ def unsup_hist(results,figsize):
         maxx = np.max(np.abs(data[didx]))
         
         xv = xr[0] #+  0.2*(xr[1] - xr[0])
-        ax_objs[-1].text(xv,max_val/2,               "Mean:     {:.1f}{}".format(mean,units[didx]),fontsize = 1000/scale,va="top")
-        ax_objs[-1].text(xv,max_val/2-(0.05*max_val),"Mean Abs: {:.1f}{}".format(MA,units[didx]),fontsize = 1000/scale,va="top")
-        ax_objs[-1].text(xv,max_val/2-(0.1*max_val), "Stdev:    {:.1f}{}".format(stddev,units[didx]),fontsize = 1000/scale,va="top")
-        ax_objs[-1].text(xv,max_val/2-(0.15*max_val),"Max:      {:.1f}{}".format(maxx,units[didx]),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(xv,max_val/2,               "Mean:     {:.2f}{}".format(mean,units[didx]),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(xv,max_val/2-(0.05*max_val),"Mean Abs: {:.2f}{}".format(MA,units[didx]),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(xv,max_val/2-(0.1*max_val), "Stdev:    {:.2f}{}".format(stddev,units[didx]),fontsize = 1000/scale,va="top")
+        ax_objs[-1].text(xv,max_val/2-(0.15*max_val),"Max:      {:.2f}{}".format(maxx,units[didx]),fontsize = 1000/scale,va="top")
         
         if len(results) > 1:
             mean = np.mean(data2[didx])
@@ -585,16 +616,16 @@ def unsup_hist(results,figsize):
             xv = xr[0] + 0.16*(xr[1] - xr[0])
             # may need a black border
             
-            ax_objs[-1].text(xv,max_val/2,     " ({:.1f}{})".format(mean,units[didx]),fontsize = 1000/scale,va="top",ha="left", color=color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
-            ax_objs[-1].text(xv,max_val/2-(0.05*max_val)," ({:.1f}{})".format(MA,units[didx]),fontsize = 1000/scale,va="top",ha="left", color= color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
-            ax_objs[-1].text(xv,max_val/2-(0.1*max_val), " ({:.1f}{})".format(stddev,units[didx]),fontsize = 1000/scale,va="top",ha="left", color= color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
-            ax_objs[-1].text(xv,max_val/2-(0.15*max_val)," ({:.1f}{})".format(maxx,units[didx]),fontsize = 1000/scale,va="top",ha="left", color= color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
+            ax_objs[-1].text(xv,max_val/2,     " ({:.2f}{})".format(mean,units[didx]),fontsize = 1000/scale,va="top",ha="left", color=color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
+            ax_objs[-1].text(xv,max_val/2-(0.05*max_val)," ({:.2f}{})".format(MA,units[didx]),fontsize = 1000/scale,va="top",ha="left", color= color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
+            ax_objs[-1].text(xv,max_val/2-(0.1*max_val), " ({:.2f}{})".format(stddev,units[didx]),fontsize = 1000/scale,va="top",ha="left", color= color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
+            ax_objs[-1].text(xv,max_val/2-(0.15*max_val)," ({:.2f}{})".format(maxx,units[didx]),fontsize = 1000/scale,va="top",ha="left", color= color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
 
     plt.tight_layout()
     gs.update(hspace= -0.2)
     
     
-    fig.text(0.5,0.95,"Trajectory Attribute Histograms",fontsize = 2000/scale,ha = "center")
+    fig.text(0.5,0.95,title,fontsize = 2000/scale,ha = "center")
     return f2a(fig)
 
 def chart_MOT(results,figsize):
@@ -755,15 +786,19 @@ def history(results,figsize):
     raw_names = []
     datetimes = []
     postprocessed = []
-    
+        
     for coll in os.listdir(results_dir):
         
         
         with open(os.path.join(results_dir,coll),"rb") as f:
             hist_result = pickle.load(f)
-        hist_result = agg_score(hist_result)
         hist_gt_coll = hist_result["gt"]
         if hist_gt_coll == results[0]["gt"]: # only keep results on same GT
+            try:
+                hist_result = agg_score(hist_result)
+            except:
+                continue
+        
             primaries.append(hist_result[primary_metric])
             secondaries.append(hist_result["spider"][secondary_metric])  
             tertiaries.append(hist_result[tertiary_metric])  
@@ -1185,11 +1220,12 @@ def gen_pane(results = [],
     
     
     now = datetime.now()
+    now = now.strftime("%Y-%m-%d_%H-%M-%S")
     f_name = "./push_images/{}.png".format(now)
     cv2.imwrite(f_name,dashboard)
     
-    #snow = now.strftime("%Y-%m-%d_%H-%M-%S")
-    url = 'http://10.2.219.208:5991/upload?type=test'
+    #now = now.strftime("%Y-%m-%d_%H-%M-%S")
+    url = 'http://viz-dev.isis.vanderbilt.edu:5991/upload?type=test'
     files = {'upload_file': open(f_name,'rb')}
     ret = requests.post(url, files=files)
     print(ret)
@@ -1213,33 +1249,65 @@ def agg_score(result):
     """
     Appends spider with agg score quantities to result
     """
+    if False: # Old Score formula
     
-    spider = {}
-    spider["MOTA"]              = result["mota"]
-    spider["Realtime"]             = result["bps"] / 30
-    spider["X Error"]           = max(0, 1 - result["MAE_x"] / 5.0  )
-    spider["% to Extents"]      = (  result["cause_of_death"]["Exit FOV"] + result["cause_of_death"]["Active at End"] )    /result["n_pred"]
-    spider["Trajectory Length"] = min(1,result["x_traveled_avg"] /  (sum(result["gt_x_traveled"])/len(result["gt_x_traveled"])))
-    spider["Avg Acceleration"]  = max(0, 1 - np.mean(np.abs(result["avg_ax_raw"])) / (5))
-    spider["Classification"]    = torch.sum(torch.diag(result["confusion_matrix"])) /torch.sum(result["confusion_matrix"])
-    spider["Avg GT cover"]      = sum(result["per_gt_recall"])/len(result["per_gt_recall"])
-    spider["Avg Pred cover"]    = sum(result["per_pred_precision"])/len(result["per_pred_precision"])
-    
-    score_weighting = {
-        "MOTA":2,
-        "Realtime":2,
-        "% to Extents":0.5,
-        "X Error":1,
-        "Trajectory Length":1,
-        "Avg Acceleration":1,
-        "Classification":0.5,
-        "Avg GT cover":2,
-        "Avg Pred cover":1
-        }
+        spider = {}
+        spider["MOTA"]              = result["mota"]
+        spider["Realtime"]          = result["bps"] / 30
+        spider["X Error"]           = max(0, 1 - result["MAE_x"] / 5.0  )
+        spider["% to Extents"]      = (  result["cause_of_death"]["Exit FOV"] + result["cause_of_death"]["Active at End"] )    /result["n_pred"]
+        spider["Trajectory Length"] = min(1,result["x_traveled_avg"] /  (sum(result["gt_x_traveled"])/len(result["gt_x_traveled"])))
+        spider["Avg Acceleration"]  = max(0, 1 - np.mean(np.abs(result["avg_ax_raw"])) / (5))
+        spider["Classification"]    = torch.sum(torch.diag(result["confusion_matrix"])) /torch.sum(result["confusion_matrix"])
+        spider["Avg GT cover"]      = sum(result["per_gt_recall"])/len(result["per_gt_recall"])
+        spider["Avg Pred cover"]    = sum(result["per_pred_precision"])/len(result["per_pred_precision"])
+        
+        score_weighting = {
+            "MOTA":2,
+            "Realtime":2,
+            "% to Extents":0.5,
+            "X Error":1,
+            "Trajectory Length":1,
+            "Avg Acceleration":1,
+            "Classification":0.5,
+            "Avg GT cover":2,
+            "Avg Pred cover":1
+            }
+        
+    else:
+        
+        spider = {}
+        spider["MOTA"]              = result["mota"]
+        spider["Realtime"]          = result["bps"] / 30
+        spider["X Error"]           = max(0, 1 - result["MAE_x"] / 5.0  )
+        spider["Soft Feasibility"]  = result["feasibility_score_avg"]
+        spider["Hard Feasibility"]  = len(result["all_feasible"]) / len(result["all_feasible"] + result["any_infeasible"])
+        spider["Classification"]    = torch.sum(torch.diag(result["confusion_matrix"])) /torch.sum(result["confusion_matrix"])
+        spider["Avg GT cover"]      = sum(result["per_gt_recall"])/len(result["per_gt_recall"])
+        spider["Avg Pred cover"]    = sum(result["per_pred_precision"])/len(result["per_pred_precision"])
+        
+        score_weighting = {
+            "MOTA":2,
+            "Realtime":2,
+            "X Error":1,
+            "Soft Feasibility":2,
+            "Hard Feasibility":0.5,
+            "Classification":0.5,
+            "Avg GT cover":2,
+            "Avg Pred cover":1
+            }
     
     result["Aggregate Score"] = sum([score_weighting[key] * spider[key] for key in spider.keys()])
     result["spider"] = spider
     result["score_weighting"] = score_weighting
+    
+    
+    
+    
+    
+    
+    
+    
     return result
 
 #%% TO BE IMPLEMENTED
@@ -1319,9 +1387,9 @@ def main(mode = "latest v latest", close = 0):
             #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/sympathetic_osprey--RAW_GT1__juxtaposes.cpkl",
             #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/ostentatious_hippo--RAW_GT1__harasses.cpkl",
             #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/pristine_stork--RAW_GT1__smacks.cpkl",
-            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/introspective_falcon--RAW_GT1.cpkl",
+            #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/introspective_falcon--RAW_GT1.cpkl",
             "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/sanctimonious_beluga--RAW_GT1__administers.cpkl",
-            #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/sympathetic_cnidarian--RAW_GT1__juxtaposes.cpkl"
+            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/sympathetic_cnidarian--RAW_GT1__juxtaposes.cpkl"
             ]
     #results.reverse()
     
@@ -1340,18 +1408,35 @@ def main(mode = "latest v latest", close = 0):
                       [4,0.5,4,0.5], # Unsupervised Summary     #
                       [4,1,4,2],     # Unsupervised General (List)
                       [4,3,4,6],     # Unsupervised Histograms     #
-                      [8,8,4,1],     # Conf Var Dist
                       
                       [8,0.5,8,0.5], # Supervised Summary      #
-                      [8,1,4,4], # MOT metrics (1-norm)        #
-                      [8,5,4,3], # Confusion Matrix            #
- 
-                      [12,1,4,4], # State error                #  
-                      [12,5,4,2], # MOT chart
+                      [8,1,4,2], # MOT metrics (1-norm)        #
+                      [8,3,4,2], # Confusion Matrix            #
+                      [8,5,4,4], # PLACEHOLDER
+
+                      [12,1,4,3], # State error                #  
+                      [12,4,4,3], # MOT chart
                       [12,7,4,2], # Additional Hover Info
                       ])
     
-    pane_functions = [gen_title,gen_spiderplot,history,death_pie,unsup_title,chart_unsup,unsup_hist,iou_scatter,sup_title,bar_MOT,conf_matrix,state_error,chart_MOT,sup_hist]
+    pane_functions = [gen_title,
+                      gen_spiderplot,
+                      history,
+                      death_pie,
+                      
+                      unsup_title,
+                      chart_unsup,
+                      unsup_hist,
+                      
+                      sup_title,
+                      bar_MOT,
+                      chart_MOT,
+                     
+                      unsup_hist2,
+                      conf_matrix,
+                      state_error,
+                      
+                      sup_hist]
     
     
     gen_pane(results = results,
@@ -1362,6 +1447,6 @@ def main(mode = "latest v latest", close = 0):
     
     
 if __name__ == "__main__":
-    #main(mode = "best v best")
-    main(mode = "manual")
+    main(mode = "latest v latest")
+    #main(mode = "manual")
    

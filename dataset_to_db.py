@@ -1,4 +1,4 @@
-from i24_database_api.db_writer import DBWriter
+from i24_database_api import DBClient
 from i24_configparse import parse_cfg
 
 import os
@@ -9,7 +9,22 @@ class WriteWrapper():
     
     def __init__(self,collection_name,server_id = -1):
     
-        
+        db_param = {
+              #"default_host": "10.2.218.56",
+              #"default_port": 27017,
+              "host":"10.2.218.56",
+              "port":27017,
+              "username":"i24-data",
+              "password":"mongodb@i24",
+              #"default_username": "i24-data",
+              #"readonly_user":"i24-data",
+              #"default_password": "mongodb@i24",
+              "database_name": "trajectories",      
+              "server_id": 1,
+              "session_config_id": 1,
+              #"trajectory_database":"trajectories",
+              #"timestamp_database":"transformed"
+              }
     
         self.SESSION_CONFIG_ID = os.environ["TRACK_CONFIG_SECTION"]
         self.PID = os.getpid()
@@ -18,19 +33,21 @@ class WriteWrapper():
         self = parse_cfg("TRACK_CONFIG_SECTION",obj=self)    
     
         
-        self.dbw = DBWriter(
-                       host               = self.host, 
-                       port               = self.port, 
-                       username           = self.username, 
-                       password           = self.password,
-                       database_name      = self.db_name, 
-                       schema_file        = self.schema_file,
-                       collection_name    = collection_name,
-                       server_id          = self.COMPUTE_NODE_ID, 
-                       session_config_id  = self.SESSION_CONFIG_ID,
-                       process_id         = self.PID,
-                       process_name       = "groundtruth"
-                       )
+        # self.dbw = DBWriter(
+        #                host               = self.host, 
+        #                port               = self.port, 
+        #                username           = self.username, 
+        #                password           = self.password,
+        #                database_name      = self.db_name, 
+        #                schema_file        = self.schema_file,
+        #                collection_name    = collection_name,
+        #                server_id          = self.COMPUTE_NODE_ID, 
+        #                session_config_id  = self.SESSION_CONFIG_ID,
+        #                process_id         = self.PID,
+        #                process_name       = "groundtruth"
+        #                )
+        
+        self.dbw = DBClient(**db_param,collection_name = collection_name)
             
         self.prev_len = len(self) -1
         self.prev_doc = None
@@ -151,10 +168,10 @@ class WriteWrapper():
     
             
 if __name__ == "__main__":
-    data_file = "data/linear_spacing_splines_6.cpkl"
+    data_file = "./data/gt_data/linear_spacing_splines_4.cpkl"
 
     # 1. Create writer object
-    ww = WriteWrapper("groundtruth_scene_2_TEST")
+    ww = WriteWrapper("groundtruth_scene_3")
     
     # 2. Load data pickle
     with open(data_file,"rb") as f:

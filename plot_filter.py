@@ -25,8 +25,8 @@ classmap = ["sedan","midsize","van","pickup","semi","truck"]
 
 
 def evaluate(db_param,
-             gt_collection   = "groundtruth_scene_1_130",
-             pred_collection = "inductive_jackalope--RAW_GT1",
+             gt_collection   = "groundtruth_scene_2_57",
+             pred_collection = "wry_ox--RAW_GT2",
              kf_param_path   = "/home/derek/Documents/i24/i24_track/data/kf_params/kf_params_save3.cpkl",
              n_plot = 200):
     
