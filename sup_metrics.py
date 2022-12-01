@@ -590,6 +590,159 @@ def evaluate(db_param,
     
     return  RESULT
 
+def bonus_evaluate(db_param,
+             pred_collection = "paradoxical_wallaby--RAW_GT1",
+             sample_freq     = 30,
+             append_db = False,
+             iou_threshold = 0.3):
+    
+    
+    prd   = DBReader(**db_param,collection_name = pred_collection)
+    
+    if append_db:
+        dbw = DBWriter(**db_param,collection_name = pred_collection)
+        print("Appending assigned gt_ids to predicted data collection.")
+    
+    preds = list(prd.read_query(None))
+    
+    if len(preds) == 0:
+        print("Collection {} is empty".format(pred_collection))
+        return None
+    
+   
+    n_pred_resample_points = {}
+    # 2. Parse collections into expected format for MOT EVAL
+    
+    # for each object, get the minimum and maximum timestamp
+    ####################################################################################################################################################       SUPERVISE
+    pred_times = np.zeros([len(preds),2])
+    for oidx,obj in enumerate(preds):
+        pred_times[oidx,0] = obj["first_timestamp"]
+        pred_times[oidx,1] = obj["last_timestamp"]
+    
+    # get start and end time
+    start_time = np.min(pred_times)
+    stop_time   = np.max(pred_times) # we don't want to penalize in the event that some GT tracks extend beyond the times for which predictions were generated
+    
+    ####################################################################################################################################################       SUPERVISED
+    
+        
+    # 3. Resample to fixed timestamps - each element is a list of dicts with id,x,y
+    pred_resampled = []
+    
+    times = np.arange(start_time,stop_time,1/sample_freq)
+    # for each sample time, for each object, if in range find the two surrounding trajectory points and interpolate
+    
+    
+    # create id_converters
+    CONV_PRED = {}
+    running_counter = 0
+   
+    for item in preds:
+        _id = item["_id"]
+        CONV_PRED[running_counter] = _id
+        CONV_PRED[_id] = running_counter
+        running_counter += 1
+    
+    
+    
+    # Assemble dictionary of relevant attributes (median dimensions etc) indexed by id
+    
+    ####################################################################################################################################################       SUPERVISED
+  
+    pred_dict = {}
+    class_counter = np.zeros(10)
+    for item in preds:
+        class_counter[item["coarse_vehicle_class"]] += 1
+        if type(item["length"]) == list:
+            item["length"] = statistics.median(item["length"])
+            item["width"] = statistics.median(item["width"])
+            item["height"] = statistics.median(item["height"])
+        pred_dict[CONV_PRED[item["_id"]]] = item
+    
+    # gt_id_converter_dict = {}
+    # for frag_id in gt_dict:
+    #     gt_id_converter_dict[frag_id] = gt_dict[frag_id]["_id"]
+    
+    # 4. Run MOT Eval to get MOT-style metrics
+    
+    ####################################################################################################################################################       SUPERVISED
+   
+    
+    ### Unsupervised metrics  --- statistics
+    RESULT = {}
+    
+    # Total Variation
+    travelled = 0
+    diffx = 0
+    diffy = 0
+    for traj in pred_dict.values():
+        for idx in range(1,len(traj["x_position"])):
+            diffx += np.abs(traj["x_position"][idx] - traj["x_position"][idx-1])
+            diffy += np.abs(traj["y_position"][idx] - traj["y_position"][idx-1])
+        travelled += np.abs(traj["ending_x"] - traj["starting_x"])
+    
+    # Total # Trajectories
+    total_pred = len(pred_dict)
+    
+    RESULT["x_variation"] = diffx/travelled
+    RESULT["y_variation"] = diffy/total_pred
+    
+    
+    # Roadway extents
+    minx = np.inf
+    maxx = -np.inf
+    
+   
+    
+    
+    ### Other Trajectory Quantities
+    # Average Trajectory length and duration
+    
+    
+    avg_pred_length = []
+    for traj in pred_dict.values():
+        avg_pred_length.append(np.abs(traj["ending_x"] - traj["starting_x"]))
+    avg_pred_length = sum(avg_pred_length) / len(avg_pred_length)
+    
+   
+    avg_pred_dur = []
+    for traj in pred_dict.values():
+        avg_pred_dur.append(np.abs(traj["last_timestamp"] - traj["first_timestamp"]))
+    avg_pred_dur = sum(avg_pred_dur) / len(avg_pred_dur)
+    
+    # Flag counter
+    COD = {}
+    COD_length = {}
+    COD["Active at End"] = 0
+    COD_length["Active at End"] = []
+
+    for traj in pred_dict.values():
+        death =  traj["flags"][0]
+        if death not in COD.keys():
+            COD[death] = 1
+            COD_length[death] = [len(traj["x_position"])]
+        else:
+            COD[death] += 1
+            COD_length[death].append(len(traj["x_position"]))
+    RESULT["cause_of_death"] = COD
+    
+    RESULT["observations_by_cause_of_death"] = COD_length
+    
+    
+    
+    
+    # A few more
+    n_pred = len(preds)
+    RESULT["n_pred"] = n_pred
+
+    RESULT["gen_time"] = preds[0]["_id"].generation_time   
+            
+    RESULT["classes"] = class_counter
+    
+    return  RESULT
+
+
 if __name__ == "__main__":
     db_param = {
           "default_host": "10.2.218.56",

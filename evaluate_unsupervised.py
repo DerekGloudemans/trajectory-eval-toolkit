@@ -1,6 +1,7 @@
 
-from sup_metrics     import evaluate
-from unsup_statistics  import call
+from sup_metrics     import bonus_evaluate
+from new_unsup2 import call
+# from unsup_statistics  import call
 
 from i24_database_api import DBClient
 
@@ -12,7 +13,7 @@ import _pickle as pickle
 import warnings
 warnings.filterwarnings("ignore")
 
-from eval_dashboard import main as dash
+from unsup_eval_dashboard import main as dash
 
 
 
@@ -27,7 +28,7 @@ def get_pickle(name):
 def save_collection_and_reconciled_descendants(collection_name):
     pass
     
-def main(gt_coll = "groundtruth_scene_2_57", TAG = "GT2"): #"groundtruth_scene_1_130", TAG = "GT1"):
+def main(collection_name):
     pc  = None
     sc = None
     for db_name in ["trajectories","reconciled"]:
@@ -39,14 +40,14 @@ def main(gt_coll = "groundtruth_scene_2_57", TAG = "GT2"): #"groundtruth_scene_1
               "username": "mongo-admin",
               "password": "i24-data-access",
               "database_name": db_name,      
-              "server_id": 1,
-              "session_config_id": 1,
+              #"server_id": 1,
+              #"session_config_id": 1,
               }
         
         IOUT = 0.3
         coll_name = None
         append_db = False
-        if db_name == "trajectories": append_db  = True
+        if db_name == "trajectories": append_db  
 
         # connect to database
         dbw   = DBClient(**db_param)
@@ -56,16 +57,15 @@ def main(gt_coll = "groundtruth_scene_2_57", TAG = "GT2"): #"groundtruth_scene_1
         [print(item) for item in existing_collections]
         print("\n")
         
-        if coll_name is None:
-            to_evaluate = existing_collections
-        else:
-            to_evaluate = [coll_name]
-            
-        for coll_name in to_evaluate:
-            if TAG in coll_name:
-                
+        # if coll_name is None:
+        #     to_evaluate = existing_collections
+        # else:
+        #     to_evaluate = [coll_name]
+        to_evaluate = [collection_name]
+        
+        for coll_name in to_evaluate:                
                 # check whether has already been evaluated
-                save_name = "./data/eval_results/{}.cpkl".format(coll_name)
+                save_name = "./data/eval_results_unsupervised/{}.cpkl".format(coll_name)
                 if os.path.exists(save_name):
                     continue
                 
@@ -74,6 +74,7 @@ def main(gt_coll = "groundtruth_scene_2_57", TAG = "GT2"): #"groundtruth_scene_1
                 result = {}
                 #result["description"] = comment
                 result["bps"]  = 1
+                result["postprocessed"] = True if db_name == "reconciled" else False
         
                 # try to overwrite this stuff with an existing runfile
                 base_name = "./data/run_results/"+ coll_name.split("__")[0] + "_run_results.cpkl"
@@ -86,26 +87,19 @@ def main(gt_coll = "groundtruth_scene_2_57", TAG = "GT2"): #"groundtruth_scene_1
                 result["name"] = coll_name
                 result["iou_threshold"] = IOUT
     
-                try:
-                    if True:
+                metrics = bonus_evaluate(db_param,coll_name)
+                print("Computed bonus metrics")
+                for key in metrics.keys():
+                    result[key] = metrics[key]
+    
+                # try:
+                if True:
         
                         start = time.time()
-                        ### supervised evaluation
-                        if gt_coll is not None:
-                            metrics = evaluate(db_param,gt_collection = gt_coll,pred_collection = coll_name, sample_freq = 30, break_sample = 2700,append_db = append_db,iou_threshold = IOUT)
-                            
-                            if metrics is None:
-                                to_remove.append(coll_name)
-                                continue
-                            
-                            result["iou_threshold"] = IOUT
-                            result["gt"] = gt_coll        
-                            for key in metrics.keys():
-                                result[key] = metrics[key]
                     
                         ### unsupervised statistics
                         print(db_param)
-                        statistics = call(db_param,coll_name)
+                        statistics = call(db_param,coll_name, step = 25)
                         elapsed = time.time() - start
                         result["eval_time"] = elapsed
                 
@@ -122,16 +116,16 @@ def main(gt_coll = "groundtruth_scene_2_57", TAG = "GT2"): #"groundtruth_scene_1
                 
                         # create a few new ones
                         result["overlaps_per_object"] = len(result["overlaps"]) / result["traj_count"]
-                        result["percens"] = len(result["backward_cars"]) / result["traj_count"]
-                        result["MAE_x"] = np.mean(np.abs(result["state_error"][:,0]))
+                        #result["percent_backwards"] = len(result["backward_cars"]) / result["traj_count"]
+                        #result["MAE_x"] = np.mean(np.abs(result["state_error"][:,0]))
                 
                         
                  
                         ## Save results dict in /data/eval_results
                         with open(save_name, 'wb') as f:
                             pickle.dump(result, f)
-                except Exception as e:
-                    print("Error processing collection {}: {}".format(coll_name,e))
+                # except Exception as e:
+                #     print("Error processing collection {}: {}".format(coll_name,e))
                             
         
         if True and len(to_remove) > 0:
@@ -144,6 +138,8 @@ def main(gt_coll = "groundtruth_scene_2_57", TAG = "GT2"): #"groundtruth_scene_1
     return result
     
 if __name__ == "__main__":
-    result = main()
+    cn = "63599d40c8d071a13a9e5294"
+    #cn = "635997ddc8d071a13a9e5293"
+    result = main(cn)
     
     

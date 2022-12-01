@@ -26,18 +26,18 @@ classmap = ["sedan","midsize","van","pickup","semi","truck"]
 
 def evaluate(db_param,
              gt_collection   = "groundtruth_scene_2_57",
-             pred_collection = "wry_ox--RAW_GT2",
-             kf_param_path   = "/home/derek/Documents/i24/i24_track/data/kf_params/kf_params_save3.cpkl",
-             n_plot = 200):
+             pred_collection = "incandescent_cyborg--RAW_GT2",
+             kf_param_path   = "/home/derek/Documents/i24/i24_track/data/kf_params/kf_params_save4.cpkl",
+             n_plot = 1000):
     
     
     with open(kf_param_path,"rb") as f:
         kf_params = pickle.load(f)
     meas_cov = kf_params["R"].diag().sqrt()
-    #print(meas_cov)
+    # print(meas_cov)
+    # print(kf_params["Q"].diag().sqrt())
     
-    
-    
+    print(kf_params)
     
     
     prd   = DBReader(**db_param,collection_name = pred_collection)
@@ -60,20 +60,26 @@ def evaluate(db_param,
     for oidx,obj in enumerate(gts):
         gt_times[oidx,0] = obj["first_timestamp"]
         gt_times[oidx,1] = obj["last_timestamp"]
-        
+       
     pred_times = np.zeros([len(preds),2])
     for oidx,obj in enumerate(preds):
         pred_times[oidx,0] = obj["first_timestamp"]
         pred_times[oidx,1] = obj["last_timestamp"]
-    
+    earliest_time = np.min(pred_times)
+
         
-    plot_pred_idx = [i for i in range(n_plot)]
+    plot_pred_idx = [i for i in range(len(preds))]
     for p_idx in plot_pred_idx:
+        
+        
         
        # if preds[p_idx]["flags"][0] in ["Active at End", "Exit FOV"]:
        #     continue
         
         pred = preds[p_idx]
+        
+        # if pred["local_fragment_id"] not in [336,502,665]:
+        #     continue
         
         pre_shift = 0.01
         
@@ -200,7 +206,7 @@ def evaluate(db_param,
         # get normalizing speed  for x position
         rise = posterior[-1,0] - posterior[0,0]
         run = state_times[-1] - state_times[0]
-        slope = rise/run
+        slope = rise/run 
         intercept = state[0,0]
         
         if False:
@@ -208,7 +214,9 @@ def evaluate(db_param,
             intercept = 0
         
         state[:,0] = state[:,0] - state_times_unshifted * slope - intercept
+        
         measurement[:,0] =  measurement[:,0] - times*slope - intercept
+        
         
         # covariance windows
         cov_1plus  =     np.sqrt(covariance) + state
@@ -226,7 +234,7 @@ def evaluate(db_param,
                             
         
         n_plots = len(posterior[0])
-        scale = 5
+        scale = 6
         fig = plt.figure(figsize =(5*scale,n_plots*scale))
         gs = (grid_spec.GridSpec(n_plots,1))
         y_labels = ["speed-norm X (ft)","Y (ft)", "L (ft)", "W (ft)", "H (ft)", "V (ft/s)"]
@@ -234,8 +242,8 @@ def evaluate(db_param,
         ax_objs = []
         
         
-        gt_colors = np.random.rand(len(relevant_gts),3) * 0.5
-        gt_colors[:,1] += 0.5
+        gt_colors = np.random.rand(len(relevant_gts),3) 
+        gt_colors[:,2] = 0.1
         
         
         
@@ -269,7 +277,7 @@ def evaluate(db_param,
                 # plot measurements
                 ax_objs[-1].scatter(times,measurement[:,didx],color = (1,0,0), marker = "x")
                 for m_idx in range(len(measurement)):   
-                    ax_objs[-1].text(times[m_idx],measurement[m_idx,didx],"{:.2f}".format(meas_conf[m_idx]),va = "bottom", ha = "center",fontsize = 3*scale)
+                    #ax_objs[-1].text(times[m_idx],measurement[m_idx,didx],"{:.2f}".format(meas_conf[m_idx]),va = "bottom", ha = "center",fontsize = 3*scale)
                     
                     # plot meas cov windows
                     ymin = measurement[m_idx,didx] -meas_cov[didx].item()
@@ -344,37 +352,30 @@ def evaluate(db_param,
         #         ax_objs[-1].text(xv,max_val/2-(0.1*max_val), " ({:.1f}{})".format(stddev,units[didx]),fontsize = 1000/scale,va="top",ha="left", color= color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
         #         ax_objs[-1].text(xv,max_val/2-(0.15*max_val)," ({:.1f}{})".format(maxx,units[didx]),fontsize = 1000/scale,va="top",ha="left", color= color_pallette[1]/255,bbox=dict(facecolor="white",edgecolor="white",alpha=0.7))
     
-        
+        ax_objs[-1].set_ylim([0,80])
         gs.update(hspace= 0.02)
         
         duration = run
         dist_duration = np.abs(rise)
         direct = 'WB' if pred["direction"] == -1 else "EB"
         fig.text(0.1,0.93,"{} {} (idx {}), {}".format(classmap[pred["coarse_vehicle_class"]],pred["local_fragment_id"],p_idx,direct),fontsize = 10*scale,ha = "left",va = "bottom")
-        fig.text(0.1,0.92,"Duration: {:.1f}s, {:.1f} ft.  Cause of Death: {}".format(duration,dist_duration,pred["flags"][0]),fontsize = 6*scale,ha = "left",va = "top")
+        fig.text(0.1,0.92,"First Timestamp: {:.3f}s, Duration: {:.1f}s, {:.1f} ft.  Cause of Death: {}".format(pred_times[p_idx,0]-earliest_time,duration,dist_duration,pred["flags"][0]),fontsize = 6*scale,ha = "left",va = "top")
         plt.tight_layout()
         
-        fig.savefig("./data/filter_plots/{}_{}_{}_{}.png".format(pred_collection,p_idx,classmap[pred["coarse_vehicle_class"]],pred["local_fragment_id"]))
+        fig.savefig("./data/filter_plots/{}_{}_{}_{}.png".format(pred_collection,pred["local_fragment_id"],p_idx,classmap[pred["coarse_vehicle_class"]]))
         #fig.show()
 
     # 
 
 if __name__ == "__main__":
     db_param = {
-          #"default_host": "10.2.218.56",
-          #"default_port": 27017,
-          "host":"10.2.218.56",
+          "host":"10.80.4.91",
           "port":27017,
-          "username":"i24-data",
-          "password":"mongodb@i24",
-          #"default_username": "i24-data",
-          #"readonly_user":"i24-data",
-          #"default_password": "mongodb@i24",
+          "username": "mongo-admin",
+          "password": "i24-data-access",
           "database_name": "trajectories",      
           "server_id": 1,
           "session_config_id": 1,
-          #"trajectory_database":"trajectories",
-          #"timestamp_database":"transformed"
           }
     r = evaluate(db_param)
 

@@ -123,7 +123,7 @@ if __name__ == "__main__":
     mcm = MongoCollectionManager(**db_param)
     mcm.list_saved_collections()
     
-    if False:
+    if True:
         save_reconciled_descendants(db_param,"trajectories","reconciled")
         
     

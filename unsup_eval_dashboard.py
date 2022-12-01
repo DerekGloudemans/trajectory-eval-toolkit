@@ -57,7 +57,7 @@ def random_pallette(length):
 
 #%% Globals 
 global results_dir
-results_dir = "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/"
+results_dir = "/home/derek/Documents/i24/trajectory-eval-toolkit/data/unsup_eval_results/"
 
 global dpi
 dpi = 162
@@ -180,8 +180,10 @@ def gen_title(results,figsize):
         comment = results[0]["description"]
     except:
         comment = ""
-    gt_dataset = results[0]["gt"]
-    
+    try:
+        gt_dataset = results[0]["gt"]
+    except:
+        gt_dataset = "No GT data"
     
     
     fig = plt.figure(figsize=(figsize[0]/scale,figsize[1]/scale))
@@ -471,7 +473,7 @@ def state_error(results,figsize):
     return f2a(fig)
 
 def unsup_hist2(results,figsize):
-    to_plot = ["distance_score_raw","backward_score_raw","acceleration_score_raw","rotation_score_raw","conflict_score_raw","feasibility_score_raw"]
+    to_plot = ["distance_score_raw","backward_score_raw","acceleration_score_raw","rotation_score_raw","feasibility_score_raw"] #"conflict_score_raw",
     units = ["","","","","",""]
     title = "Unsupervised Score"
     
@@ -488,7 +490,7 @@ def unsup_hist(results,
                uniform_x = False
                ):
 
-    if "residual_raw" not in results[0].keys() or sum(results[0]["residual_raw"]) == 0:
+    if ("residual_raw" not in results[0].keys() or sum(results[0]["residual_raw"]) == 0) and "residual_raw" in to_plot:
         to_plot = ["x_traveled_raw","avg_vx_raw","avg_ax_raw","vx_raw","ax_raw"]
     
     
@@ -1277,14 +1279,14 @@ def agg_score(result):
     else:
         
         spider = {}
-        spider["MOTA"]              = result["mota"]
+        #spider["MOTA"]              = result["mota"]
         spider["Realtime"]          = result["bps"] / 30
-        spider["X Error"]           = max(0, 1 - result["MAE_x"] / 5.0  )
+        #spider["X Error"]           = max(0, 1 - result["MAE_x"] / 5.0  )
         spider["Soft Feasibility"]  = result["feasibility_score_avg"]
-        spider["Hard Feasibility"]  = len(result["all_feasible"]) / len(result["all_feasible"] + result["any_infeasible"])
-        spider["Classification"]    = torch.sum(torch.diag(result["confusion_matrix"])) /torch.sum(result["confusion_matrix"])
-        spider["Avg GT cover"]      = sum(result["per_gt_recall"])/len(result["per_gt_recall"])
-        spider["Avg Pred cover"]    = sum(result["per_pred_precision"])/len(result["per_pred_precision"])
+        spider["Hard Feasibility"]  = len(result["all_feasible_id"]) / len(result["all_feasible_id"] + result["any_infeasible_id"])
+        #spider["Classification"]    = torch.sum(torch.diag(result["confusion_matrix"])) /torch.sum(result["confusion_matrix"])
+        #spider["Avg GT cover"]      = sum(result["per_gt_recall"])/len(result["per_gt_recall"])
+        #spider["Avg Pred cover"]    = sum(result["per_pred_precision"])/len(result["per_pred_precision"])
         
         score_weighting = {
             "MOTA":2,
@@ -1321,7 +1323,7 @@ def main(mode = "latest v latest", close = 0):
         latest_raw_time = None
         latest_post_path = None
         latest_post_time = None
-        directory = "./data/eval_results"
+        directory = "./data/eval_results_unsupervised"
         for result_path in os.listdir(directory):
             path = os.path.join(directory,result_path)
             with open(path,"rb") as f:
@@ -1334,7 +1336,7 @@ def main(mode = "latest v latest", close = 0):
                 elif result["postprocessed"]  and (latest_post_time is None or result["gen_time"] > latest_post_time):
                     latest_post_time = result["gen_time"]
                     latest_post_path = path
-        results = [latest_post_path,latest_raw_path]
+        results = [latest_raw_path,latest_raw_path]
     
     elif mode == "latest v best": # latest and best 
 
@@ -1389,47 +1391,38 @@ def main(mode = "latest v latest", close = 0):
     
 
     for i in range(len(results)):
+        
         with open(results[i],"rb") as f:
             results[i] = pickle.load(f)
 
     # pane = origin x, origin y, width , height
     panes = np.array([[0,0,4,1], # Title   # 
                       [0,1,4,3], # Spider
-                      [0,4,4,3], # History
-                      [0,7,4,2], # Death   #
-
-                      [4,0.5,4,0.5], # Unsupervised Summary     #
-                      [4,1,4,2],     # Unsupervised General (List)
-                      [4,3,4,6],     # Unsupervised Histograms     #
+                      [0,4,4,5], # Unsup chart
                       
-                      [8,0.5,8,0.5], # Supervised Summary      #
-                      [8,1,4,2], # MOT metrics (1-norm)        #
-                      [8,3,4,2], # Confusion Matrix            #
-                      [8,5,4,4], # PLACEHOLDER
+                      [4,0,4,6], # Unsupervised Histograms 
+                      [4,6,4,3], # Death Pie
+                      
+                      [8,0,4,6],     # Unsupervised Histograms 2 (feasibility)    #
+                      [8,6,4,3],     # Class info
 
-                      [12,1,4,3], # State error                #  
-                      [12,4,4,3], # MOT chart
-                      [12,7,4,2], # Additional Hover Info
+                     
+                      [12,0,4,3], # State error                #  
+                      [12,3,4,3], # MOT chart
+                      [12,6,4,3], # Additional Hover Info
                       ])
     
     pane_functions = [gen_title,
                       gen_spiderplot,
-                      history,
-                      death_pie,
-                      
-                      unsup_title,
                       chart_unsup,
                       unsup_hist,
-                      
-                      sup_title,
-                      bar_MOT,
-                      chart_MOT,
-                     
-                      unsup_hist2,
-                      conf_matrix,
-                      state_error,
-                      
-                      sup_hist]
+                      death_pie,
+                      unsup_hist2, # feasibility
+                      dummy, # eventually class dist
+                      dummy,# eventually speed v time
+                      dummy,#eventually throughput v time
+                      dummy,# eventually density v time 
+                      ]
     
     
     gen_pane(results = results,
@@ -1440,6 +1433,6 @@ def main(mode = "latest v latest", close = 0):
     
     
 if __name__ == "__main__":
-    #main(mode = "best v best")
-    main(mode = "manual")
+    main(mode = "latest v latest")
+    #main(mode = "manual")
    
