@@ -14,12 +14,108 @@ import motmetrics
 import torch
 
 
-
-
-
+from matplotlib.collections import LineCollection
+import matplotlib.pyplot as plt
 
 #[col["name"] for col in list(gtd.db.list_collections())] # list all collections
 #delete_collection(["garbage_dump_2","groundtruth_scene_2_TEST","groundtruth_scene_1_TEST","garbage_dump","groundtruth_scene_2"])
+
+def plot_trajectories(gt_resampled,pred_resampled):
+    FP_shift = 0
+    lane_boundaries = [-10,12,24,36,60,84,96,108,130]
+    # for each lane, do a subplot
+    
+    leg = []
+    fig, axs = plt.subplots(2, 4, figsize=(20,8), sharex=True)
+    
+    
+    axs[0,0].set_ylabel("x-position (ft)", fontsize=20)
+    axs[1,0].set_ylabel("x-position (ft)", fontsize=20)
+    axs[1,0].set_xlabel("Time (s)", fontsize=20)
+    axs[1,1].set_xlabel("Time (s)", fontsize=20)
+    axs[1,2].set_xlabel("Time (s)", fontsize=20)
+    axs[1,3].set_xlabel("Time (s)", fontsize=20)
+
+    axs[0,0].set_title("EB Lane 4", fontsize=20)
+    axs[0,1].set_title("EB Lane 3", fontsize=20)
+    axs[0,2].set_title("EB Lane 2", fontsize=20)
+    axs[0,3].set_title("EB Lane 1", fontsize=20)
+    axs[1,0].set_title("WB Lane 4", fontsize=20)
+    axs[1,1].set_title("WB Lane 3", fontsize=20)
+    axs[1,2].set_title("WB Lane 2", fontsize=20)
+    axs[1,3].set_title("WB Lane 1", fontsize=20)
+    
+    for lidx in range(8):
+        ridx = int(lidx//4)
+        cidx = int(lidx% 4)
+        
+        if ridx == 1:
+            cidx = 3-cidx
+        
+        ax = axs[ridx,cidx]
+        ax.set_xlim([0,55])
+        ax.set_ylim([-100,2100])
+        ax.tick_params(axis='both', which='major', labelsize=14)
+        # for one lane
+        lane_extents = [lane_boundaries[lidx],lane_boundaries[lidx+1]]
+        
+        colors = np.array([[0,0.2,1,1],
+                           [1,0.8,0,1],
+                           [1,0,0,1]])
+        plot_segments = []
+        plot_colors   = []
+        # iterate through all gt_resampled
+        for fidx in range(1,len(gt_resampled)):
+            
+    
+            # for each trajectory, plot each timestep colored by "tval" and masked by y-range
+            for id in gt_resampled[fidx]:
+                if id in gt_resampled[fidx-1]:
+                     
+                    y = gt_resampled[fidx][id]["y"] 
+                    if y > lane_extents[0] and y < lane_extents[1]:
+                        segment = np.array([[gt_resampled[fidx-1][id]["timestamp"],gt_resampled[fidx-1][id]["x"]],[gt_resampled[fidx][id]["timestamp"],gt_resampled[fidx][id]["x"]]])
+                        plot_segments.append(segment)
+                        plot_colors.append(colors[gt_resampled[fidx][id]["tval"]])
+                        
+        plot_segments = np.stack(plot_segments)
+        plot_colors = np.stack(plot_colors)
+        lc = LineCollection(plot_segments, colors=plot_colors,linewidths = 2)
+        ax.add_collection(lc)
+        
+        
+        if True: # plot preds as well, they tend to mostly just overlap at this x-scale
+            plot_segments = []
+            plot_colors   = []
+            # iterate through all pred_resampled
+            for fidx in range(1,len(pred_resampled)):
+                
+        
+                # for each trajectory, plot each timestep colored by "tval" and masked by y-range
+                for id in pred_resampled[fidx]:
+                    if id in pred_resampled[fidx-1]:
+                         
+                        y = pred_resampled[fidx][id]["y"] 
+                        if y > lane_extents[0] and y < lane_extents[1] and pred_resampled[fidx][id]["tval"] != 0:
+                            segment = np.array([[pred_resampled[fidx-1][id]["timestamp"],pred_resampled[fidx-1][id]["x"]+FP_shift],[pred_resampled[fidx][id]["timestamp"],pred_resampled[fidx][id]["x"]+FP_shift]])
+                            plot_segments.append(segment)
+                            plot_colors.append(colors[pred_resampled[fidx][id]["tval"]])
+            if len(plot_segments) > 0:       
+                plot_segments = np.stack(plot_segments)
+                plot_colors = np.stack(plot_colors)
+                lc2 = LineCollection(plot_segments, colors=plot_colors,linewidths = 1)
+                ax.add_collection(lc2)
+            
+    handle1, = axs[0,-1].plot([0,0],[-1,-1],color = colors[0])
+    handle2, = axs[0,-1].plot([0,0],[-1,-1],color = colors[1])
+    handle3, = axs[0,-1].plot([0,0],[-1,-1],color = colors[2])
+    axs[0,-1].legend([handle1,handle2,handle3],["True Positive","False Negative","False Positive"], loc='upper right',fontsize = 16)
+    
+    fig.tight_layout()
+    #plt.subplots_adjust(wspace=0.25, hspace=0.05)
+    plt.savefig("ts_eval.pdf", bbox_inches="tight")
+    fig.show()
+    
 
 def state_iou(a,b,threshold = 0.3):
     """ a,b are in state formulation (x,y,l,w,h) - returns iou in range [0,1]"""
@@ -71,7 +167,8 @@ def evaluate(db_param,
              sample_freq     = 30,
              break_sample = 2700,
              append_db = False,
-             iou_threshold = 0.3):
+             iou_threshold = 0.3,
+             plot_traj = False):
     
     RESULT = {"postprocessed":True}
     
@@ -95,6 +192,13 @@ def evaluate(db_param,
     n_gt_resample_points = {}
     n_pred_resample_points = {}
     # 2. Parse collections into expected format for MOT EVAL
+    
+    
+    # ensure objects are monotonic
+    for obj in gts:
+        for i in range(1,len(obj["x_position"])-1):
+            if (obj["x_position"][i+1] - obj["x_position"][i])*obj["direction"] < 0:
+                obj["x_position"][i+1] = obj["x_position"][i] + 0.5*(obj["x_position"][i] - obj["x_position"][i-1])
     
     # for each object, get the minimum and maximum timestamp
     ####################################################################################################################################################       SUPERVISED
@@ -125,7 +229,8 @@ def evaluate(db_param,
     times = np.arange(start_time,stop_time,1/sample_freq)
     # for each sample time, for each object, if in range find the two surrounding trajectory points and interpolate
     
-    
+    max_pred_id = 0
+    max_gt_id = 0
     # create id_converters
     CONV_GT = {}
     CONV_PRED = {}
@@ -135,24 +240,32 @@ def evaluate(db_param,
         CONV_GT[running_counter] = _id
         CONV_GT[_id] = running_counter
         running_counter += 1
+        
+
+            
     for item in preds:
         _id = item["_id"]
         CONV_PRED[running_counter] = _id
         CONV_PRED[_id] = running_counter
         running_counter += 1
-    
+
+            
     for st in times:
-        
-        st_gt = []
-        st_pred = []
+        #print("On sample time {}, {}% done".format(st,(st-times[0])/(times[-1]-times[0])))
+        st_gt = {}
+        st_pred = {}
         
         ####################################################################################################################################################       SUPERVISED
         for gidx in range(len(gts)):
             if st >= gt_times[gidx,0] and st <= gt_times[gidx,1]:
                 # find closest surrounding times to st for this object - we'll sample sample_idx and sample_idx +1
                 sample_idx = 0
-                while gts[gidx]["timestamp"][sample_idx+1] <= st:
-                    sample_idx += 1
+                try:
+                    while gts[gidx]["timestamp"][sample_idx+1] <= st:
+                        sample_idx += 1
+                except IndexError:
+                    print("IndexError")
+                    continue
                     
                 # linearly interpolate 
                 diff = gts[gidx]["timestamp"][sample_idx+1] - gts[gidx]["timestamp"][sample_idx]
@@ -160,12 +273,15 @@ def evaluate(db_param,
                 
                 x_int = gts[gidx]["x_position"][sample_idx] + c2 * (gts[gidx]["x_position"][sample_idx+1] - gts[gidx]["x_position"][sample_idx])
                 y_int = gts[gidx]["y_position"][sample_idx] + c2 * (gts[gidx]["y_position"][sample_idx+1] - gts[gidx]["y_position"][sample_idx])
+                t_int = (gts[gidx]["timestamp"][sample_idx]  + c2 * (gts[gidx]["timestamp"][sample_idx+1]  - gts[gidx]["timestamp"][sample_idx])) - start_time
                 
                 obj = {"id":CONV_GT[gts[gidx]["_id"]],
                         "x":x_int,
-                        "y":y_int
+                        "y":y_int,
+                        "tval":1, # by default false-negative
+                        "timestamp":t_int
                         }
-                st_gt.append(obj)
+                st_gt[obj["id"]] = obj
                 
                 try:
                     n_gt_resample_points[CONV_GT[gts[gidx]["_id"]]] += 1
@@ -196,6 +312,7 @@ def evaluate(db_param,
                 
                 x_int = preds[pidx]["x_position"][sample_idx] + c2 * (preds[pidx]["x_position"][sample_idx+1] - preds[pidx]["x_position"][sample_idx])
                 y_int = preds[pidx]["y_position"][sample_idx] + c2 * (preds[pidx]["y_position"][sample_idx+1] - preds[pidx]["y_position"][sample_idx])
+                t_int = (preds[pidx]["timestamp"][sample_idx] + c2 * (preds[pidx]["timestamp"][sample_idx+1] - preds[pidx]["timestamp"][sample_idx])) - start_time
                 
                 try:
                     conf_int = preds[pidx]["detection_confidence"][sample_idx] + c2 * (preds[pidx]["detection_confidence"][sample_idx+1] - preds[pidx]["detection_confidence"][sample_idx])
@@ -207,10 +324,12 @@ def evaluate(db_param,
                 obj = {"id":CONV_PRED[preds[pidx]["_id"]],
                         "x":x_int,
                         "y":y_int,
+                        "timestamp":t_int,
+                        "tval":2, # by default false-positive
                         "xvar":xvar_int,
                         "conf":conf_int,
                         }
-                st_pred.append(obj)
+                st_pred[obj["id"]] = obj
                 
                 try:
                     n_pred_resample_points[CONV_PRED[preds[pidx]["_id"]]] += 1
@@ -218,6 +337,8 @@ def evaluate(db_param,
                     n_pred_resample_points[CONV_PRED[preds[pidx]["_id"]]] = 1
                 
         pred_resampled.append(st_pred)
+        
+        #if len(gt_resampled) > 100: break
                 
     print("Resampling complete")
     
@@ -232,7 +353,6 @@ def evaluate(db_param,
             item["length"] = item["length"][0]
             item["width"] = item["width"][0]
             item["height"] = item["height"][0]
-    
     pred_dict = {}
     for item in preds:
         if type(item["length"]) == list:
@@ -258,20 +378,20 @@ def evaluate(db_param,
     event_list = []
     
     # we'll run through frames and compute iou for all pairs, which will give us the set of MOT metrics
-    for fidx in range(len(gt_resampled))[:break_sample]:
+    for fidx in range(len(gt_resampled)):#[:break_sample]:
         #print("On sample {} ({}s)".format(fidx, times[fidx]))
         
-        gt_ids = [item["id"] for item in gt_resampled[fidx]]
-        pred_ids = [item["id"] for item in pred_resampled[fidx]]
+        gt_ids = [item["id"] for item in gt_resampled[fidx].values()]
+        pred_ids = [item["id"] for item in pred_resampled[fidx].values()]
         gt_pos = []
         pred_pos = []
         
-        for item in gt_resampled[fidx]:
+        for item in gt_resampled[fidx].values():
             id = item["id"]
             pos = np.array([item["x"],item["y"],gt_dict[id]["length"],gt_dict[id]["width"],gt_dict[id]["height"],gt_dict[id]["direction"]])
             gt_pos.append(pos)
             
-        for item in pred_resampled[fidx]:
+        for item in pred_resampled[fidx].values():
             id = item["id"]
             pos = np.array([item["x"],item["y"],pred_dict[id]["length"],pred_dict[id]["width"],pred_dict[id]["height"],pred_dict[id]["direction"]])
             pred_pos.append(pos)
@@ -315,14 +435,31 @@ def evaluate(db_param,
     match_conf = []
     match_xvar = []
     
+    # we want to record the position of each object across time and whether it was a FP, FN, or TP at that time
+    # additionally we want to record the position of each object switch and fragmentation
+    frag_dict = [] # contains [[timestamp,x_pos,y_pos],[]...]
+    switch_dirct = [] # contains [[timestamp,x_pos,y_pos],[]...]
+    
+    match_matrix = np.zeros([len(gts)*5,len(preds)*5])
+    gt_counts = np.zeros(len(gts)*5)
+    pred_counts = np.zeros(len(preds)*5)
+    
     # we care only about
     relevant = ["MATCH","SWITCH","TRANFER","ASCEND","MIGRATE"]
     for event in acc.events.iterrows():
         fidx = event[0][0]
         event = event[1]
         if event[0] in relevant:
-            gt_id   = event[1]
-            pred_id = event[2]
+            gt_id   = int(event[1])
+            pred_id = int(event[2])
+            
+            if event[0] == "MATCH":
+                gt_resampled[fidx][gt_id]["tval"] = 0 # 0 = TP, 1 = FN, 2 = FP
+                pred_resampled[fidx][pred_id]["tval"] = 0 # 0 = TP, 1 = FN, 2 = FP
+            
+            # match_matrix[gt_id,pred_id] += 1
+            # gt_counts[gt_id] += 1
+            # pred_counts[pred_id] += 1
             
             # store pred_ids in gt_dict
             if "assigned_frag_ids" not in gt_dict[gt_id].keys():
@@ -337,7 +474,7 @@ def evaluate(db_param,
                 pred_dict[pred_id]["assigned_gt_ids"].append(gt_id)
                 
             # compute state errors
-            for pos in pred_resampled[fidx]:
+            for pos in pred_resampled[fidx].values():
                 if pos["id"] == pred_id:
                     pred_pos = np.array([pos["x"],pos["y"],pred_dict[pred_id]["length"],pred_dict[pred_id]["width"],pred_dict[pred_id]["height"]])
                     
@@ -351,7 +488,7 @@ def evaluate(db_param,
                         match_iou.append(iou)
                     break
                 
-            for pos in gt_resampled[fidx]:
+            for pos in gt_resampled[fidx].values():
                 if pos["id"] == gt_id:
                     gt_pos = np.array([pos["x"],pos["y"],gt_dict[gt_id]["length"],gt_dict[gt_id]["width"],gt_dict[gt_id]["height"]])
                     break
@@ -364,7 +501,32 @@ def evaluate(db_param,
             
             confusion_matrix[gt_cls,pred_cls] += 1
         
+        # elif event[0] == "MISS":
+        #     gt_id = int(event[1])
+        #     gt_counts[gt_id] += 1
             
+        #     gt_resampled[fidx][gt_id]["tval"] = 1 # 0 = TP, 1 = FN, 2 = FP
+            
+            
+        # elif event[0] == "FP":
+        #     pred_id = int(event[2])
+        #     pred_counts[pred_id] += 1
+        #     pred_resampled[fidx][pred_id]["tval"] = 2 # 0 = TP, 1 = FN, 2 = FP
+               
+            
+    # HOTA_DET_IOU = TP/(TP+FP+FN)
+    # HOTA_ASS_IOUs = []
+    # for i in range(len(gts)):
+    #     for j in range(len(preds)):
+            
+    #         if match_matrix[i,j] > 0:
+    #             match_iou = match_matrix[i,j] / (pred_counts[j] + gt_counts[i] -match_matrix[i,j] )
+                
+    #             HOTA_ASS_IOUs.append(match_iou)
+    # HOTA_ASS_IOU = sum(HOTA_ASS_IOUs)/len(HOTA_ASS_IOUs)
+        
+    if plot_traj:
+        plot_trajectories(gt_resampled,pred_resampled)
     ####################################################################################################################################################       SUPERVISED
 
     ### State Accuracy Metrics
@@ -542,51 +704,108 @@ def evaluate(db_param,
     
     RESULT["gt_x_traveled"] = [np.abs(max(traj["x_position"]) - min(traj["x_position"])) for traj in gt_dict.values()]
         
-    # estimate trail-offs
-    trail_off_distances = []
-    toff_count = 0
+
     
-    idx3 = -20
-    idx2 = -10
-    idx0 = -1
-    trail_off_threshold = 200 # feet
-    
-    import matplotlib.pyplot as plt
-    
-    # for traj in pred_dict.values():
+    #%% COMPUTE HOTA METRICS AT VARYING IOU THRESHOLDS      
+    if True:
+            print("Computing HOTA.. get comfortable, this could take a bit.")
+            all_HOTA = []
+            for alpha in np.arange(0.05,1,0.05):
+                # various accumulators
+                acc = motmetrics.MOTAccumulator(auto_id = True)
+                state_errors = [] # each entry will be a state_size array with state errors for each state variable
+                
+                
+                # we'll run through frames and compute iou for all pairs, which will give us the set of MOT metrics
+                for fidx in range(len(gt_resampled)):#[:break_sample]:
+                    #print("On sample {} ({}s)".format(fidx, times[fidx]))
+                    
+                    gt_ids = [item["id"] for item in gt_resampled[fidx].values()]
+                    pred_ids = [item["id"] for item in pred_resampled[fidx].values()]
+                    gt_pos = []
+                    pred_pos = []
+                    
+                    for item in gt_resampled[fidx].values():
+                        id = item["id"]
+                        pos = np.array([item["x"],item["y"],gt_dict[id]["length"],gt_dict[id]["width"],gt_dict[id]["height"],gt_dict[id]["direction"]])
+                        gt_pos.append(pos)
+                        
+                    for item in pred_resampled[fidx].values():
+                        id = item["id"]
+                        pos = np.array([item["x"],item["y"],pred_dict[id]["length"],pred_dict[id]["width"],pred_dict[id]["height"],pred_dict[id]["direction"]])
+                        pred_pos.append(pos)
+                   
+                    # compute IOUs for gts and preds
+                    if len(pred_pos) == 0 or len(gt_pos) == 0:
+                        
+                        ious = np.zeros([len(gt_ids),1])
+                    else:
+                        ious = state_iou(np.stack(gt_pos),np.stack(pred_pos),threshold = alpha)
+                
+                    
+                    acc.update(gt_ids,pred_ids,ious)   
+                
+                
+                #%%##################### Compute Metrics #####################
+                
+                # Summarize MOT Metrics
+                metric_module = motmetrics.metrics.create()
+                summary = metric_module.compute(acc) 
+                # for metric in summary:
+                #     print("{}: {}".format(metric,summary[metric][0]))  
+                
+                FP = summary["num_false_positives"][0]
+                FN = summary["num_misses"][0]
+                TP = (summary["recall"][0] * FN) / (1-summary["recall"][0])
+                
+                ####################################################################################################################################################       SUPERVISED
+                
+
+                    
+                # Now parse events into matchings              
+                match_matrix = np.zeros([len(gts)*5,len(preds)*5])
+                gt_counts = np.zeros(len(gts)*5)
+                pred_counts = np.zeros(len(preds)*5)
+                
+                # we care only about
+                #relevant = ["MATCH","SWITCH","TRANFER","ASCEND","MIGRATE"]
+                for event in acc.events.iterrows():
+                    fidx = event[0][0]
+                    event = event[1]
+                    if event[0] == "MATCH":
+                        gt_id   = int(event[1])
+                        pred_id = int(event[2])
+                        
+                        match_matrix[gt_id,pred_id] += 1
+                        gt_counts[gt_id] += 1
+                        pred_counts[pred_id] += 1
+                        
+                    elif event[0] == "MISS":
+                        gt_id = int(event[1])
+                        gt_counts[gt_id] += 1
+                    elif event[0] == "FP":
+                        pred_id = int(event[2])
+                        pred_counts[pred_id] += 1
+                    
+                        
+                HOTA_DET_IOU = TP/(TP+FP+FN)
+                HOTA_ASS_IOUs = []
+                for i in range(len(gt_counts)):
+                    for j in range(len(pred_counts)):
+                        
+                        if match_matrix[i,j] > 0:
+                            match_iou = match_matrix[i,j] / (pred_counts[j] + gt_counts[i] -match_matrix[i,j] )
+                            
+                            HOTA_ASS_IOUs.append(match_iou)
+                HOTA_ASS_IOU = sum(HOTA_ASS_IOUs)/(len(HOTA_ASS_IOUs)+0.1)
+                
+                HOTA = (HOTA_ASS_IOU * HOTA_DET_IOU)**0.5
+                all_HOTA.append(HOTA)
+                print("@ alpha = {}: {:.3f},{:.3f},{:.3f}".format(alpha,HOTA, HOTA_DET_IOU,HOTA_ASS_IOU))
         
-    #     if len(traj["x_position"]) > np.abs(idx3) + 1:
-        
-        
-        
-    #         x3 =  traj["x_position"][idx3]
-    #         y3 =  traj["y_position"][idx3]
-    #         t3 =   traj["timestamp"][idx3]
-            
-    #         x2 =  traj["x_position"][idx2]
-    #         y2 =  traj["y_position"][idx2]
-    #         t2 =   traj["timestamp"][idx2]
-            
-    #         x0 =  traj["x_position"][idx0]
-    #         y0 =  traj["y_position"][idx0]
-    #         t0 =   traj["timestamp"][idx0]
-            
-    #         dt32     =  t2 - t3
-    #         dt30     =  t0 - t3
-    #         x_interp =  x3 + ((x2 - x3) / dt32 * dt30)
-    #         y_interp =  y3 + ((y2 - y3) / dt32 * dt30)
-            
-    #         trail_off_dist = np.sqrt((x_interp - x0)**2 + (y_interp - y0)**2)
-            
-    #         print(trail_off_dist)
-            
-    #         trail_off_distances.append(trail_off_dist)
-        
-    #         color = (0,0.5,0.1)
-    #         if trail_off_dist > trail_off_threshold:
-    #             toff_count += 1
-    #             color = (1,0,0)
-    #         plt.plot(traj["timestamp"],traj["x_position"],color = color)
+            HOTA = sum(all_HOTA)/len(all_HOTA)
+            RESULT["HOTA"] = HOTA
+            print("HOTA: {}".format(HOTA))
     
     return  RESULT
 

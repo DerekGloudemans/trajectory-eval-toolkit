@@ -27,11 +27,12 @@ def get_pickle(name):
 def save_collection_and_reconciled_descendants(collection_name):
     pass
     
-def main(gt_coll = None): #"groundtruth_scene_1_130", TAG = "GT1"):
+def main(gt_coll,coll_names = None): #"groundtruth_scene_1_130", TAG = "GT1"):
     pc  = None
     sc = None
-    for db_name in ["trajectories","reconciled"]:
-        to_remove = []
+    for db_name in  ["trajectories","reconciled"]:
+        coll_name = None
+        
 
         db_param = {
               "host":"10.80.4.91",
@@ -39,40 +40,52 @@ def main(gt_coll = None): #"groundtruth_scene_1_130", TAG = "GT1"):
               "username": "mongo-admin",
               "password": "i24-data-access",
               "database_name": db_name,      
-              "server_id": 1,
-              "session_config_id": 1,
               }
-        
-        IOUT = 0.5
-        coll_name = None
         append_db = False
         if db_name == "trajectories": append_db  = True
+        
+        IOUT = 0.5
+        
 
         # connect to database
         dbw   = DBClient(**db_param)
         existing_collections = dbw.list_collection_names() # list all collections
         existing_collections.sort()
-        print("\n Existing Collections in database -  {}:".format(dbw.database_name)) 
-        [print(item) for item in existing_collections]
-        print("\n")
         
-        if coll_name is None:
+        if False:
+            print("\n Existing Collections in database -  {}:".format(dbw.database_name)) 
+            [print(item) for item in existing_collections]
+            print("\n")
+        
+        if coll_names is None:
             to_evaluate = existing_collections
         else:
-            to_evaluate = [coll_name]
-            
-        for coll_name in to_evaluate:
-            if TAG in coll_name:
+            to_evaluate = coll_names
+        
+        for name in to_evaluate:
+            if "ICCV" in  name:
                 
+                if db_name == "trajectories":
+                    coll_name = name
+                else:
+                    for collection in existing_collections:
+                        if name in collection:
+                            coll_name = collection
+                            
+                            # check whether has already been evaluated
+                            save_name = "./data/ICCV_results/{}.cpkl".format(coll_name)
+                            if not os.path.exists(save_name):
+                                break
+                            
+                    if coll_name is None:
+                        continue
+                    
                 # check whether has already been evaluated
-                save_name = "./data/eval_results/{}.cpkl".format(coll_name)
-                if os.path.exists(save_name):
-                    continue
+                save_name = "./data/ICCV_results/{}.cpkl".format(coll_name)
+                # if os.path.exists(save_name):
+                #     continue
                 
-                # generate comment
-                #comment = input("Description of run settings / test for storage with evaluation results: ")    
                 result = {}
-                #result["description"] = comment
                 result["bps"]  = 1
         
                 # try to overwrite this stuff with an existing runfile
@@ -86,24 +99,22 @@ def main(gt_coll = None): #"groundtruth_scene_1_130", TAG = "GT1"):
                 result["name"] = coll_name
                 result["iou_threshold"] = IOUT
     
-                try:
-                    if True:
-        
-                        start = time.time()
-                        ### supervised evaluation
-                        if gt_coll is not None:
-                            metrics = evaluate(db_param,gt_collection = gt_coll,pred_collection = coll_name, sample_freq = 30, break_sample = 2700,append_db = append_db,iou_threshold = IOUT)
-                            
-                            if metrics is None:
-                                to_remove.append(coll_name)
-                                continue
-                            
-                            result["iou_threshold"] = IOUT
-                            result["gt"] = gt_coll        
-                            for key in metrics.keys():
-                                result[key] = metrics[key]
-                    
-                        ### unsupervised statistics
+                if True:
+                    start = time.time()
+                    ### supervised evaluation
+                    if gt_coll is not None:
+                        metrics = evaluate(db_param,gt_collection = gt_coll,pred_collection = coll_name, sample_freq = 30,append_db = append_db,iou_threshold = IOUT,plot_traj = True)
+                        
+                        if metrics is None: #empty collection
+                            to_evaluate.remove(coll_name)
+                            continue 
+                        result["iou_threshold"] = IOUT
+                        result["gt"] = gt_coll        
+                        for key in metrics.keys():
+                            result[key] = metrics[key]
+                
+                    ### unsupervised statistics
+                    if False:
                         print(db_param)
                         statistics = call(db_param,coll_name)
                         elapsed = time.time() - start
@@ -125,25 +136,18 @@ def main(gt_coll = None): #"groundtruth_scene_1_130", TAG = "GT1"):
                         result["percens"] = len(result["backward_cars"]) / result["traj_count"]
                         result["MAE_x"] = np.mean(np.abs(result["state_error"][:,0]))
                 
-                        
-                 
-                        ## Save results dict in /data/eval_results
-                        with open(save_name, 'wb') as f:
-                            pickle.dump(result, f)
-                except Exception as e:
-                    print("Error processing collection {}: {}".format(coll_name,e))
+                    
+             
+                    ## Save results dict in /data/eval_results
+                    with open(save_name, 'wb') as f:
+                        pickle.dump(result, f)
                             
         
-        if True and len(to_remove) > 0:
-            print("\n The following collections are empty: {}".format(to_remove))
-            inp = input("Do you want to remove these collections? (Y/N)")
-            if inp == "Y":
-                dbw.delete_collections(to_remove)
     
-    dash(mode = "latest v latest",close = 1000)
-    return result
+    #dash(mode = "latest v latest",close = 1000)
+    #return result
     
 if __name__ == "__main__":
-    result = main()
+    result = main("ICCV_2023_scene3_SPLINES",coll_names = ["ICCV_2023_scene3_TRACKLETS"])
     
-    
+    "ICCV_scene3_prism_3D_NMS_byte_economic_crystalline_entity"

@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import matplotlib.lines as lines
 import matplotlib.dates as mdates
+import matplotlib.cm as cm
 import _pickle as pickle
 import numpy as np
 import cv2
@@ -57,12 +58,12 @@ def random_pallette(length):
 
 #%% Globals 
 global results_dir
-results_dir = "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/"
+results_dir = "/home/derek/Documents/i24/trajectory-eval-toolkit/data/ICCV_results/"
 
 global dpi
 dpi = 162
 global scale 
-scale = 50
+scale = 25 #50
 #plt.style.use("bmh")
 global MD
 MD = {
@@ -357,6 +358,177 @@ def death_pie(results,figsize):
     #plt.tight_layout()
 
 
+    return f2a(fig)
+
+
+def contour_2D(results,figsize,coll_idx = -1):
+    
+    fig = plt.figure(figsize = (figsize[0]/scale,figsize[1]/scale))
+    ax = fig.gca()
+
+    if coll_idx == -1:
+        err = np.concatenate((results[0]["state_error"],results[1]["state_error"]))
+    else:
+        err = results[coll_idx]["state_error"]
+
+    x = err[:,0]
+    y = err[:,1]
+    xmin, xmax = -8,8
+    ymin, ymax = -3.5,3.5
+    granularity = 4
+    
+    # # Peform the kernel density estimate
+    xx, yy = np.mgrid[xmin:xmax:64j, ymin:ymax:28j]
+    positions = np.vstack([xx.ravel(), yy.ravel()])
+    values = np.vstack([x, y])
+    kernel = gaussian_kde(values)
+    f = np.reshape(kernel(positions).T, xx.shape)
+    f = f/np.sum(f)
+    
+
+    # count hits in each bin
+    bin_f = np.zeros([granularity*2*xmax,int(granularity*2*ymax)])
+    # bin width = 0.5 ft
+    # error bin = error *2 + 200
+    
+    for error in err:
+        xb = int(error[0] * granularity + xmax*granularity)
+        yb = int(error[1] * granularity + ymax*granularity)
+        
+        try:
+            bin_f[xb,yb] += 1
+        except:
+            pass
+    
+        
+    f_new = np.zeros(f.shape)
+    for i in range(f.shape[0]):
+        for j in range(f.shape[1]):
+            count = (np.where(f > f[i,j],1,0) * bin_f).sum() / bin_f.sum()
+            f_new[i,j] = count
+    f = f_new
+    
+    
+    from scipy.ndimage.filters import gaussian_filter
+    fmooth = gaussian_filter(f, sigma=3)
+    
+    
+    ### WRONG - we need to ravel s.t. we get percent of data in bins with a corresponding value less than or equal to this valeu
+    # now. we need to ravel f such that each value is (percent of data that are = or greater than this value)
+    
+   
+    
+    f_errors = np.zeros(f.shape)
+    for i in range(f_errors.shape[0]):
+        for j in range(f_errors.shape[1]):
+            x_error_comp = (j - xmax*granularity)/granularity
+            y_error_comp = (i - ymax*granularity)/granularity
+            total_err = (x_error_comp**2 + y_error_comp**2)**0.5
+            f_errors[i,j] = total_err
+            
+    # now, for each entry in f, use f_errors <= entry as a mask to count f
+    f_errors = torch.from_numpy(f_errors)
+    f_new = np.zeros(f.shape)
+    for i in range(f_errors.shape[0]):
+        for j in range(f_errors.shape[1]):
+            mask = torch.where(f_errors[i,j] >= f_errors,1,0).data.numpy()
+            f_new[i,j] = np.sum(f*mask) / np.sum(f)
+        
+    #f = f_new
+    
+
+    
+    state_errors = err
+    ax.scatter(state_errors[:,0],state_errors[:,1], marker = ".", color = (0,0,0,1),s = 0.4)
+    points_data = ax.scatter([-50],[-50], marker = ".", color = (0,0,0,1),s = 4,label = "Single Positional Error")
+
+    sigma =  3  # 2.4 CEP * 1.2 CEP to DRMS * feet per meter
+    sigma2 = 1
+    CEP_count = np.where((state_errors[:,0]**2 + state_errors[:,1]**2)**0.5 < sigma,1,0).astype(float).mean()
+    CEP_count2 = np.where((state_errors[:,0]**2 + state_errors[:,1]**2)**0.5 < sigma2
+                          ,1,0).astype(float).mean()
+    # Contourf plot
+    cmap = 'YlGnBu_r'
+    levels = list(np.arange(0,1,0.1)) + [0.95,0.99]
+    cfset = ax.contourf(xx, yy, f, levels = levels,cmap=cmap, alpha = 0.8)
+    
+
+    
+    ## Or kernel density estimate plot instead of the contourf plot
+    #ax.imshow(np.rot90(f), cmap='Blues', extent=[xmin, xmax, ymin, ymax])
+    # Contour plot
+    # sd = (np.e-1)/e
+    # levels = [0.5*sd, sd,1.5*sd,2*sd,3*sd]
+    
+    cset = ax.contour(xx, yy, f,levels = levels, linestyles = "dotted", linewidths = 2, colors='k')
+    
+    levels = [0.5]
+    cset = ax.contour(xx, yy, f,levels = levels, linewidths = 2, colors='k')
+    ax.clabel(cset, inline=True, inline_spacing = -4, fontsize=24)
+    
+    levels = [0.8]
+    cset = ax.contour(xx, yy, f,levels = levels, linewidths = 2, colors='k')
+    ax.clabel(cset, inline=True, inline_spacing = -4, fontsize=24)
+    
+    levels = [0.9]
+    cset = ax.contour(xx, yy, f,levels = levels, linewidths = 2, colors='k')
+    ax.clabel(cset, inline=True, inline_spacing = -4, fontsize=24)
+
+    levels = [0.95]
+    cset = ax.contour(xx, yy, f,levels = levels, linewidths = 2, colors='k')
+    ax.clabel(cset, inline=True, inline_spacing = -4, fontsize=24)
+    
+    levels = [0.99]
+    cset = ax.contour(xx, yy, f,levels = levels, linewidths = 2, colors='k')
+    ax.clabel(cset, inline=True, inline_spacing = -4, fontsize=24)
+
+    # Label plot
+    
+    #levels = [0.2,0.4,0.6,0.8]
+
+    #cset.collections[0].set_label("test")
+
+    
+    ax.set_xlabel('X Positional Error (ft)',fontsize = 32)
+    ax.set_ylabel('Y Positional Error (ft)',fontsize = 32)
+    #ax.axis("equal")
+    ax.tick_params(axis='both', labelsize=24)
+    # plot 1sigma, 2 sigma, and 3 sigma according to sensor error (2.5m CEP)
+    
+    GPS_color = "r"
+    circle1 = plt.Circle((0, 0), sigma, color=GPS_color, fill = False, label = "<3 Foot Error", linewidth = 2,)
+    circle2 = plt.Circle((0, 0), sigma2, color=(1,0.4,0), fill = False, label = "<1 Foot Error",linestyle = "--", linewidth = 2,)
+
+    circle_proxy = plt.Circle((0, 0), 0, color=cm.get_cmap(cmap)(0), fill = True, label = "Positional Error Distribution",  alpha = 0.75)
+
+    #circle2 = plt.Circle((0, 0), sigma*2.9, color=GPS_color, fill = False,label = "R99.7")
+    # circle3 = plt.Circle((0, 0), sigma*3, color=GPS_color, fill = False)
+    #circle2 = plt.Circle((0.5, 0.5), 0.2, color='blue')
+    #circle3 = plt.Circle((1, 1), 0.2, color='g', clip_on=False)
+    
+    ax.add_patch(circle1)
+    ax.add_patch(circle2)
+    # ax.add_patch(circle3)
+    # ax.add_patch(circle3)
+
+   
+    ax.annotate("{:.2f}".format(CEP_count),(sigma+0.1,0.3),xycoords = "data", color = GPS_color, fontsize = 24)     
+    ax.annotate("{:.2f}".format(CEP_count2),(sigma2,0.3),xycoords = "data", color = (1,0.4,0), fontsize = 24)     
+
+    #ax.annotate("$2\sigma$",(2*sigma-2.75,0),xycoords = "data", color = GPS_color, fontsize = 16)     
+    #ax.annotate("$3\sigma$",(3*sigma-2.75,0),xycoords = "data", color = GPS_color, fontsize = 16)     
+
+    ax.set_xlim(xmin=xmin, xmax=xmax)
+    ax.set_ylim(ymin=ymin, ymax=ymax)
+    ax.set_aspect("equal")
+    ax.grid()
+    ax.legend(handles = [circle_proxy,points_data,circle1,circle2],fontsize = 32,loc = "upper left")
+    plt.show()
+
+    # fig.savefig("/home/derek/Desktop/heatmap.pdf",format = "pdf")
+    fig.savefig("/home/derek/Desktop/bullseye_new.png",bbox_inches = "tight",dpi = 300,)
+    
+    
     return f2a(fig)
 
 def state_error(results,figsize):
@@ -1245,7 +1417,7 @@ def lrk(results):
     [print(key) for key in keylist ]
     
     
-def agg_score(result):
+def agg_score(result,realtime_weight = 2):
     """
     Appends spider with agg score quantities to result
     """
@@ -1288,7 +1460,7 @@ def agg_score(result):
         
         score_weighting = {
             "MOTA":2,
-            "Realtime":2,
+            "Realtime":realtime_weight,
             "X Error":1,
             "Soft Feasibility":2,
             "Hard Feasibility":0.5,
@@ -1310,6 +1482,32 @@ def agg_score(result):
     
     return result
 
+def print_all():
+    
+    best = {}
+    
+    for coll in os.listdir(results_dir):
+        
+        
+        with open(os.path.join(results_dir,coll),"rb") as f:
+            hist_result = pickle.load(f)
+        hist_gt_coll = hist_result["gt"]
+        try:
+            hist_result = agg_score(hist_result,realtime_weight = 0)
+            agg = hist_result["Aggregate Score"]
+            description = hist_result["description"]
+            if hist_gt_coll not in best.keys():
+                best[hist_gt_coll] = agg,coll
+            else:
+                if agg > best[hist_gt_coll][0]:
+                    best[hist_gt_coll] = agg,coll
+        except:
+            continue
+        
+        print("{} - {:.2f} - {} : {}".format(hist_gt_coll,agg,coll,description))
+
+    print(best)
+
 #%% TO BE IMPLEMENTED
     
 def main(mode = "latest v latest", close = 0):
@@ -1321,7 +1519,7 @@ def main(mode = "latest v latest", close = 0):
         latest_raw_time = None
         latest_post_path = None
         latest_post_time = None
-        directory = "./data/eval_results"
+        directory = results_dir
         for result_path in os.listdir(directory):
             path = os.path.join(directory,result_path)
             with open(path,"rb") as f:
@@ -1342,7 +1540,7 @@ def main(mode = "latest v latest", close = 0):
         latest_post_time = None
         best_path = None
         best_score = None
-        directory = "./data/eval_results"
+        directory = results_dir
         for result_path in os.listdir(directory):
             path = os.path.join(directory,result_path)
             with open(path,"rb") as f:
@@ -1362,7 +1560,7 @@ def main(mode = "latest v latest", close = 0):
         best_post_score = None
         best_raw_path = None
         best_raw_score = None
-        directory = "./data/eval_results"
+        directory = results_dir
         for result_path in os.listdir(directory):
             path = os.path.join(directory,result_path)
             with open(path,"rb") as f:
@@ -1379,8 +1577,8 @@ def main(mode = "latest v latest", close = 0):
     
     else:
         results = [
-            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/unwieldy_markhor--RAW_GT2__escalates.cpkl",
-            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/unwieldy_markhor--RAW_GT2.cpkl",
+            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/ICCV_results/ICCV_prism_3D_NMS_scene3_ragged_anteater.cpkl",
+            "/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/barbarous_triceratops--RAW_GT1__impersonates.cpkl",
             #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/sanctimonious_beluga--RAW_GT1__administers.cpkl",
             #"/home/derek/Documents/i24/trajectory-eval-toolkit/data/eval_results/sympathetic_cnidarian--RAW_GT1__juxtaposes.cpkl"
             ]
@@ -1395,7 +1593,7 @@ def main(mode = "latest v latest", close = 0):
     # pane = origin x, origin y, width , height
     panes = np.array([[0,0,4,1], # Title   # 
                       [0,1,4,3], # Spider
-                      [0,4,4,3], # History
+                      [0,4,4,2.28], # History
                       [0,7,4,2], # Death   #
 
                       [4,0.5,4,0.5], # Unsupervised Summary     #
@@ -1414,7 +1612,7 @@ def main(mode = "latest v latest", close = 0):
     
     pane_functions = [gen_title,
                       gen_spiderplot,
-                      history,
+                      contour_2D,
                       death_pie,
                       
                       unsup_title,
@@ -1440,6 +1638,7 @@ def main(mode = "latest v latest", close = 0):
     
     
 if __name__ == "__main__":
-    #main(mode = "best v best")
-    main(mode = "manual")
+   #print_all()
+   #main(mode = "best v best")
+   main(mode = "latest v latest")
    
